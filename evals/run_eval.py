@@ -74,22 +74,35 @@ def run(level: str, mode: str) -> int:
     reach_success = sum(r["success"] for r in reachable)
     tool_correct = sum(r["tool_correct"] for r in reachable)
 
+    # Three metrics, not one pass-rate. Each measures a different failure.
+    n_reach = len(reachable)
+    intervened = sum(r["needed_human"] for r in reachable)
+    intervention_rate = intervened / n_reach if n_reach else 0.0
+    cost_per_success = (
+        sum(r["tokens"] for r in reachable) / reach_success if reach_success else float("inf")
+    )
+
     print(f"level={level} mode={mode}")
     for r in rows:
         tag = "" if r["reachable"] else "  (baseline, not gated)"
         mark = "PASS" if r["success"] else "FAIL"
-        print(f"  {r['id']}: {mark} tool={r['tool_correct']} ans={r['answer_correct']}{tag}")
-    print(f"reachable success: {reach_success}/{len(reachable)}  "
-          f"tool-correct: {tool_correct}/{len(reachable)}  "
-          f"baseline (unreachable) failing as expected: {sum(not r['success'] for r in unreachable)}/{len(unreachable)}")
+        miss = f" first-miss={r['first_missing_tool']}" if r["first_missing_tool"] else ""
+        print(f"  {r['id']}: {mark} tool={r['tool_correct']} ans={r['answer_correct']}{miss}{tag}")
+    print(f"reachable success: {reach_success}/{n_reach}  tool-correct: {tool_correct}/{n_reach}")
+    print(f"human-intervention rate: {intervention_rate:.0%} ({intervened}/{n_reach})  "
+          f"cost/success: {cost_per_success:.0f} tokens")
+    print(f"baseline (unreachable) failing as expected: "
+          f"{sum(not r['success'] for r in unreachable)}/{len(unreachable)}")
 
     if mode == "record" and recorder is not None:
         REC_DIR.mkdir(exist_ok=True)
         (REC_DIR / f"{level}.json").write_text(json.dumps(recorder.recording, indent=2))
         print(f"saved recording -> recorded_runs/{level}.json")
 
-    # Gate: every reachable case must succeed on tool-correctness and answer.
-    gate_pass = reach_success == len(reachable)
+    # Multi-metric gate: every reachable case resolves (tools + answer) AND no
+    # reachable case hands off to a human. Cost/success is reported for
+    # regression tracking; a run that resolves everything autonomously passes.
+    gate_pass = reach_success == n_reach and intervention_rate == 0.0
     print("GATE:", "PASS" if gate_pass else "FAIL")
     return 0 if gate_pass else 1
 

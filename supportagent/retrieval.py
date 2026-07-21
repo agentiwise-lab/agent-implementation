@@ -1,58 +1,68 @@
-"""Retrieval the agent controls: a knowledge-base search tool.
+"""Retrieval the agent controls, over a real vector store.
 
-The static retrieval system (embeddings, chunking, hybrid search, reranking) is
-the retrieval module's subject. Here retrieval becomes a tool the agent wields:
-it decides when to search, judges whether the result answers the question, and
-reformulates and searches again when it does not. That control loop, not the
-ranking, is what this file teaches; the ranking is a plain lexical score so the
-lab stays offline and deterministic.
+The knowledge base is a real Chroma collection with real embeddings (Chroma's
+local ONNX all-MiniLM model, no key), so search is by meaning, not word overlap.
+The static retrieval system, embeddings, chunking, hybrid search, reranking, is
+the retrieval module's subject; here retrieval is a tool the agent wields: it
+decides when to search, judges whether the result answers the question, and
+reformulates and searches again when it does not.
 
-The corpus is the same shape as the retrieval module's: runbooks a real company
-already has. One of them holds the answer to the spine question (why large CSV
-exports come back empty), which the agent can only find by searching.
+A cosine-distance threshold turns a weak nearest-neighbour into an explicit "no
+match" observation, so a bad query comes back as something the agent can correct
+from rather than a confidently irrelevant chunk.
 """
 
 from __future__ import annotations
 
 import pathlib
-import re
 
-from .tools import Tool
+import chromadb
+from chromadb.utils import embedding_functions
 
 _CORPUS = pathlib.Path(__file__).resolve().parent.parent / "corpus" / "runbooks"
-
-
-def _tokens(text: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9]+", text.lower()))
+# Above this cosine distance a hit is treated as no real match.
+_MAX_DISTANCE = 0.9
+_INSTANCE = 0  # gives each KnowledgeBase an isolated collection in one process
 
 
 class KnowledgeBase:
-    """A tiny lexical index over the runbook corpus."""
+    """A real Chroma vector store over the runbook corpus."""
 
-    def __init__(self, corpus_dir: pathlib.Path | None = None):
-        self._docs: list[tuple[str, str]] = []
+    def __init__(self, corpus_dir: pathlib.Path | None = None, collection: str | None = None):
+        global _INSTANCE
+        _INSTANCE += 1
+        client = chromadb.EphemeralClient()
+        self._embed = embedding_functions.DefaultEmbeddingFunction()
+        self._col = client.get_or_create_collection(
+            name=collection or f"runbooks_{_INSTANCE}",
+            embedding_function=self._embed,
+            metadata={"hnsw:space": "cosine"},
+        )
+        docs, ids = [], []
         for path in sorted((corpus_dir or _CORPUS).glob("*.md")):
-            self._docs.append((path.stem, path.read_text()))
+            docs.append(path.read_text())
+            ids.append(path.stem)
+        if docs:
+            self._col.add(documents=docs, ids=ids)
 
     def search(self, query: str, k: int = 2) -> list[tuple[str, str]]:
-        q = _tokens(query)
-        scored = []
-        for doc_id, text in self._docs:
-            overlap = len(q & _tokens(text))
-            if overlap:
-                scored.append((overlap, doc_id, text))
-        scored.sort(reverse=True)
-        return [(doc_id, text) for _, doc_id, text in scored[:k]]
+        res = self._col.query(query_texts=[query], n_results=k)
+        hits = []
+        for doc_id, doc, dist in zip(res["ids"][0], res["documents"][0], res["distances"][0]):
+            if dist <= _MAX_DISTANCE:
+                hits.append((doc_id, doc))
+        return hits
 
 
-def make_search_tool(kb: KnowledgeBase | None = None) -> Tool:
+def make_search_tool(kb: KnowledgeBase | None = None) -> "Tool":
+    from .tools import Tool
     kb = kb or KnowledgeBase()
 
     def search_knowledge_base(query: str) -> str:
         hits = kb.search(query)
         if not hits:
-            # An empty result is an observation the agent can act on: it should
-            # reformulate and search again rather than answer from nothing.
+            # An empty result is an observation the agent can act on: reformulate
+            # and search again rather than answer from nothing.
             return "no matching runbook; try a different query"
         return "\n---\n".join(f"[{doc_id}]\n{text.strip()}" for doc_id, text in hits)
 

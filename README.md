@@ -7,77 +7,87 @@ Course lectures live in `fde-program`, not here. This repo is the implementation
 Everything runs end to end with **no API key**, using two stand-ins (same discipline as M4/M5):
 
 - `FakeLLMClient` drives mechanism demos (the loop, a tool round trip, a corrective retrieval, a durable resume). It never scores anything.
-- `RecordedLLMClient` replays committed recordings of a real model for anything **scored**, so the eval harness reports real numbers offline. Live calls are opt-in with `--live`.
+- `RecordedLLMClient` replays committed recordings of a real model for anything **scored**, so the eval harness reports real numbers offline. Live calls are opt-in (`--mode live`, key via OpenRouter).
 
-## Stack
+A test double is not a product stub: the databases, the vector store, the memory, the tracing, and the state machine below are all real.
 
-**LangGraph** (agent runtime) + **Langfuse** (traces, spans, eval backend). LangGraph is introduced in V1 after a raw ~80-line loop; Langfuse is introduced in V2. Both are used in the real implementation from V3 on. No custom frontend: interaction is CLI/REPL and run visualization is the Langfuse UI (agent design is the subject, not app building).
+## Stack (all real, all runnable)
+
+| Concern | Real backend | Where |
+| --- | --- | --- |
+| Agent runtime | raw Python loop **and** a real **LangGraph** `StateGraph` (SqliteSaver checkpointer) | `supportagent/loop.py`, `supportagent/graph.py` |
+| Tracing | real **OpenTelemetry** spans (gen_ai semantic conventions), exported to **Langfuse** over OTLP | `supportagent/telemetry.py` |
+| Retrieval | real **Chroma** vector store + local **ONNX MiniLM** embeddings (no key), cosine distance + no-match threshold | `supportagent/retrieval.py` |
+| Memory | real **SQLite** long-term store (semantic / episodic / procedural) + SQLite checkpointer | `supportagent/memory/` |
+| Model | **OpenRouter** (OpenAI-compatible); fake/recorded doubles for offline | `supportagent/openrouter.py`, `supportagent/llm.py` |
+
+V1 builds the loop raw, then shows the same loop on LangGraph after the framework discussion. Langfuse is introduced in V2. No custom frontend: interaction is CLI/REPL, and run visualization is the Langfuse UI (agent design is the subject, not app building).
 
 ## Development method: eval-driven (red-green for agents)
 
-The eval case is the failing test written **before** the capability. Every capability level adds a failing eval case first, then the code that turns it green. `evals/` is a first-class part of the repo, not an afterthought.
+The eval case is the failing test written **before** the capability. Each level adds a failing case first, then the code that turns it green. The gate is multi-metric (task success, human-intervention rate, cost per success) and scoped to the cases the current level can reach: `evals/` is a first-class part of the repo.
 
 ## Capabilities compose; the level is selected at run time
 
 One package, `supportagent/`, whose capabilities stack. Any video's state runs and is compared against any other, like M5's `--stage`:
 
 ```bash
-python scripts/run_agent.py --level v1     # bare loop + one stub tool
-python scripts/run_agent.py --level v3     # + real tools + MCP
-python scripts/run_agent.py --level v5     # + memory + durable execution
-python scripts/run_agent.py --level v8     # + orchestrator + subagents
-python evals/run_eval.py    --level v4     # score any level offline
+python scripts/run_agent.py --level v3                 # + real tools + MCP + idempotent action
+python scripts/run_agent.py --level v1 --engine graph  # the loop, run on LangGraph
+python scripts/demo.py      --level v5                 # a real offline demo for any level v1..v10
+python -m evals.run_eval    --level v4 --mode recorded # score any level offline, no key
 ```
+
+Every video has a one-command demo: `python scripts/demo.py --level vN` runs real code and prints a concrete result (LangGraph run, eval gate, idempotent credit, real-embedding search, SQLite durable resume, compaction, orchestrator isolation, injection blocked, cost gate).
 
 ## Layout
 
 ```text
 agent-implementation/
   README.md
-  pyproject.toml
-  pytest.ini
+  pyproject.toml  pytest.ini
   supportagent/
-    __init__.py
-    loop.py             # V1  the while-loop: call -> act -> observe -> repeat; caps, loop detection
-    llm.py              # V1  provider client + FakeLLMClient + RecordedLLMClient
-    telemetry.py        # V1  tracing hooks (seeded here, deepened at V10)
-    caps.py             # V1  step/turn/token/cost caps, circuit breaker, goal-met signal
+    loop.py             # V1  the while-loop: call -> act -> observe -> repeat; token accounting
+    caps.py             # V1  step ceiling + loop detection on the unit of work
+    llm.py              # V1  model contract + FakeLLMClient + Recorded/Recording clients
+    openrouter.py       # V1  live OpenAI-compatible client (OpenRouter)
+    graph.py            # V1  the same loop as a real LangGraph StateGraph (+ SqliteSaver)
+    telemetry.py        # V2  real OpenTelemetry spans; OTLP export to Langfuse
     tools/
-      __init__.py
-      registry.py       # V3  tool schema, arg validation, read-vs-write tagging
-      order_status.py   # V1 stub -> V3 real
+      order_status.py   # V1  canned tool (the loop's first hand)
       account.py        # V3  account/plan lookup
-      actions.py        # V3  side-effecting (issue_credit) with idempotency guard
-    mcp/                # V3  MCP client wiring (Streamable HTTP, server-held creds)
-    retrieval.py        # V4  agentic-RAG tool wrapping rag-implementation; corrective loop
+      actions.py        # V3  side-effecting issue_credit with an idempotency guard
+    mcp/                # V3  MCP client + server (JSON-RPC over HTTP, server-held credential)
+    retrieval.py        # V4  agentic RAG: real Chroma + ONNX embeddings, no-match threshold
     memory/
-      __init__.py
-      checkpoint.py     # V5  short-term thread state (also the durable substrate)
-      store.py          # V5  long-term cross-thread: semantic / episodic / procedural
-    durable.py          # V5  durable execution / resume-without-re-running-side-effects
+      checkpoint.py     # V5  short-term thread state on SQLite (also the durable substrate)
+      store.py          # V5  long-term SQLite: semantic / episodic / procedural
     context/
-      __init__.py
       compaction.py     # V6  summarize the window; tool-result pruning
-      offload.py        # V6  scratchpad/files; just-in-time loading; recitation
+      offload.py        # V6  scratchpad/files; recitation
     orchestrator/
-      __init__.py
-      lead.py           # V8  lead agent: file ops + shell + subagent-spawning
+      workspace.py      # V8  file ops + command execution in a workspace
       subagents.py      # V8  subagent-as-tool, isolated context
-      workspace/        # V8  the file system as memory (todo + notes)
     security/
-      __init__.py
-      guards.py         # V9  input/output classifiers, injection filters
-      authz.py          # V9  per-tenant isolation, never-let-LLM-decide-authz boundary
+      guards.py         # V9  injection detection, output guard
+      authz.py          # V9  code-enforced authz boundary (never the LLM's call)
+    ops/
+      budget.py         # V10 synchronous cost gate (per-run + per-tenant)
   evals/
-    golden/             # V2  golden set mined from resolved tickets
-    trajectory.py       # V2  trajectory-level eval, tool-call correctness
-    judge.py            # V2  LLM-as-judge + calibration
-    run_eval.py         # V2  the CI gate (multi-metric, offline)
-    inline.py           # V10 continuous inline eval on a traffic slice
+    golden.py           # V2  golden set, level-aware (reachable_from)
+    trajectory.py       # V2  tool-correctness + first-upstream-failure + judge
+    judge.py            # V2  LLM-as-judge (live)
+    run_eval.py         # V2  the multi-metric gate (record | recorded | live)
+    inline.py           # V10 inline eval + canary check
     recorded_runs/      # committed model recordings; offline, no key
-  corpus/               # the support corpus (runbooks, tickets, contracts); reuses M5's
+  corpus/runbooks/      # the support corpus the retrieval tool searches
+  docs/                 # multi-agent decision rubric (V7)
+  langfuse/             # self-host Langfuse (docker compose + codified credentials)
   scripts/
-    run_agent.py        # entrypoint; --level flag per video
+    run_agent.py        # entrypoint; --level per video, --engine raw|graph
+    demo.py             # one real offline demo per level
+    live_smoke.py       # frugal live checks (OpenRouter)
+    verify_langfuse.py  # prove a real trace reaches the self-hosted Langfuse
   tests/                # offline, no key
 ```
 
@@ -85,16 +95,16 @@ agent-implementation/
 
 | Video | Capability added | Key modules |
 | --- | --- | --- |
-| V1 | the loop + one stub tool + caps | `loop.py`, `caps.py`, `telemetry.py` |
-| V2 | the eval harness (built before more capability) | `evals/` |
+| V1 | the loop + one tool + caps; the loop on LangGraph | `loop.py`, `caps.py`, `graph.py` |
+| V2 | the eval harness + real tracing | `evals/`, `telemetry.py` |
 | V3 | real tools, MCP, idempotent actions | `tools/`, `mcp/` |
 | V4 | agentic RAG, the agent runs its own search | `retrieval.py` |
-| V5 | memory (semantic/episodic/procedural), durable execution | `memory/`, `durable.py` |
+| V5 | memory (semantic/episodic/procedural), durable execution | `memory/` |
 | V6 | window curation (compaction, offloading, recitation) | `context/` |
-| V7 | (decision video, no build) | rubric doc only |
-| V8 | orchestrator + file-system workspace + subagents | `orchestrator/` |
+| V7 | (decision video, no build) | `docs/multi-agent-decision.md` |
+| V8 | orchestrator: workspace files + command execution + subagents | `orchestrator/` |
 | V9 | guards, injection defense, authz boundary | `security/` |
-| V10 | inline eval, cost gate, deploy/observability | `evals/inline.py`, `telemetry.py` |
+| V10 | inline eval, cost gate, deploy/observability | `evals/inline.py`, `ops/budget.py` |
 
 ## Setup
 
@@ -106,6 +116,43 @@ export PYTHONPATH=.
 pytest        # all offline, no API key required
 ```
 
+## Tracing with Langfuse (self-hosted)
+
+Traces are real OpenTelemetry spans, and Langfuse ingests OpenTelemetry. You can run the whole Langfuse stack locally with Docker and see the agent's runs in its UI. Credentials are **codified**, so there is no manual click-through: the compose file seeds an org, a project, a login user, and the project's API keys on first boot.
+
+**1. Bring up Langfuse (needs Docker running):**
+
+```bash
+cd langfuse
+cp .env.langfuse.example .env.langfuse          # local defaults; edit before any non-local use
+docker compose --env-file .env.langfuse -f docker-compose.yml up -d
+```
+
+`docker-compose.yml` is the official Langfuse self-host compose (postgres, clickhouse, redis, minio, langfuse web + worker), vendored unmodified. The UI comes up at http://localhost:3000.
+
+**2. How the credentials are created (no UI step).** The `LANGFUSE_INIT_*` variables in `.env.langfuse` seed everything on first boot:
+
+```dotenv
+LANGFUSE_INIT_ORG_ID=fde-m6
+LANGFUSE_INIT_PROJECT_ID=support-agent
+LANGFUSE_INIT_PROJECT_PUBLIC_KEY=pk-lf-00000000-0000-0000-0000-000000000000   # example
+LANGFUSE_INIT_PROJECT_SECRET_KEY=sk-lf-00000000-0000-0000-0000-000000000000   # example
+LANGFUSE_INIT_USER_EMAIL=admin@fde.local
+LANGFUSE_INIT_USER_PASSWORD=changeme-local-only
+```
+
+Those two project keys are what the agent reads to send traces. The example values are placeholders that work as-is on `localhost`; **regenerate every secret and pick your own keys before exposing this to any network** (`openssl rand -hex 32` for the infra secrets). Log into the UI with the seeded email/password to browse traces. `.env.langfuse` is gitignored; only `.env.langfuse.example` is committed.
+
+**3. Point the agent at Langfuse and prove a trace lands:**
+
+```bash
+set -a; . langfuse/.env.langfuse; set +a         # exports LANGFUSE_PUBLIC_KEY/SECRET_KEY/HOST
+PYTHONPATH=. python scripts/verify_langfuse.py    # runs the agent, exports spans, polls for the trace
+# -> VERIFIED: trace landed in Langfuse after ~2s
+```
+
+`setup_langfuse()` builds an OTLP exporter to `${LANGFUSE_HOST}/api/public/otel/v1/traces` with a Basic-auth header from the keys and attaches it to the tracer provider; the same gen_ai spans the agent already emits then flow to Langfuse. With no keys set it returns `False` and the agent runs untraced, so nothing here is required to use the repo.
+
 ## Status
 
-Planned. Storyboard is locked in `fde-program/m6-building-production-grade-agents/module.md`. Code is authored per video during drafting. This repo must be made **public** for the lecture deep-links to resolve.
+Built and tested (offline suite + frugal live smokes + a verified Langfuse trace). Storyboard: `fde-program/m6-building-production-grade-agents/module.md`. This repo must be **public** for the lecture deep-links to resolve.

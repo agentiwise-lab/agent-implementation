@@ -10,15 +10,20 @@ from supportagent import AgentResult, Message
 
 from evals.golden import GoldenCase
 from evals.run_eval import run
-from evals.trajectory import answer_correct, tool_correctness
+from evals.trajectory import (
+    answer_correct,
+    first_upstream_failure,
+    score_case,
+    tool_correctness,
+)
 
 
-def _result(answer: str, tool: str | None) -> AgentResult:
+def _result(answer: str, tool: str | None, stop_reason: str = "final") -> AgentResult:
     transcript = [Message(role="user", content="q")]
     if tool:
         transcript.append(Message(role="tool", content="obs", tool_name=tool))
     transcript.append(Message(role="assistant", content=answer))
-    return AgentResult(answer=answer, steps=1, stop_reason="final", transcript=transcript)
+    return AgentResult(answer=answer, steps=1, stop_reason=stop_reason, transcript=transcript)
 
 
 def test_judge_accepts_alternative_phrasings():
@@ -32,6 +37,23 @@ def test_tool_correctness_reads_the_trajectory():
     case = GoldenCase(id="x", question="q", expected_tools=["get_order_status"])
     assert tool_correctness(_result("ans", "get_order_status"), case)
     assert not tool_correctness(_result("ans", None), case)
+
+
+def test_first_upstream_failure_names_the_earliest_missing_tool():
+    case = GoldenCase(id="x", question="q", expected_tools=["get_account", "search_knowledge_base"])
+    # Nothing called: the first expected tool is where the path broke.
+    assert first_upstream_failure(_result("ans", None), case) == "get_account"
+    # First called, second missing: the break is the second tool.
+    assert first_upstream_failure(_result("ans", "get_account"), case) == "search_knowledge_base"
+
+
+def test_score_case_surfaces_intervention_signal():
+    case = GoldenCase(id="x", question="q", expected_tools=["get_order_status"])
+    resolved = score_case(_result("ans", "get_order_status"), case)
+    assert resolved["needed_human"] is False and resolved["first_missing_tool"] is None
+    # A run that hit the step ceiling did not resolve on its own.
+    handed_off = score_case(_result("stopped", "get_order_status", stop_reason="max_steps"), case)
+    assert handed_off["needed_human"] is True
 
 
 def test_recorded_gate_is_green_and_baseline_fails():

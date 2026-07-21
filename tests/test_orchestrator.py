@@ -1,8 +1,9 @@
-"""V8: the orchestrator (file-system workspace + subagent-as-tool), offline.
+"""V8: the orchestrator (workspace files + command execution + subagent), offline.
 
 Behavior under test:
 - the workspace writes, reads, and lists files, and refuses path traversal
 - file operations work through the agent's tool registry
+- the lead runs a command in the workspace and reads real output back
 - a spawned subagent runs in isolated context: only its distilled result reaches
   the lead, not its intermediate steps
 """
@@ -10,7 +11,7 @@ Behavior under test:
 import pytest
 
 from supportagent import FakeLLMClient, ToolCall, ToolRegistry, run_agent
-from supportagent.orchestrator import Workspace, make_file_tools, make_subagent_tool
+from supportagent.orchestrator import Workspace, make_exec_tool, make_file_tools, make_subagent_tool
 from supportagent.tools.order_status import order_status_tool
 
 
@@ -33,6 +34,15 @@ def test_file_tools_through_registry(tmp_path):
     tools.run("write_file", {"name": "notes.md", "content": "row limit is the cause"})
     assert "row limit" in tools.run("read_file", {"name": "notes.md"})
     assert "notes.md" in tools.run("list_files", {})
+
+
+def test_run_command_executes_in_the_workspace(tmp_path):
+    ws = Workspace(tmp_path)
+    ws.write_file("findings.md", "one two three")
+    tools = ToolRegistry([make_exec_tool(ws)])
+    # The command runs with the workspace as cwd, so it sees the file just written.
+    out = tools.run("run_command", {"command": "wc -w < findings.md"})
+    assert out.strip() == "3"
 
 
 def test_subagent_runs_in_isolated_context():

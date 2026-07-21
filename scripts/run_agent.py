@@ -15,26 +15,40 @@ from supportagent import Caps, FakeLLMClient, ToolCall, ToolRegistry, run_agent
 from supportagent.tools.order_status import order_status_tool
 
 
-def _demo_v1() -> None:
+def _script():
     # A scripted run so the loop is visible end to end without a key: the agent
     # looks the order up, reads the result, then answers.
-    client = FakeLLMClient([
+    return FakeLLMClient([
         ToolCall("get_order_status", {"order_id": "88213"}),
         "Order 88213 shows delivered on 2026-07-19, so the export gap is not a shipping issue.",
-    ])
-    result = run_agent(client, ToolRegistry([order_status_tool]),
-                       "Customer says order 88213 never arrived and their export is empty.",
-                       caps=Caps())
-    print(f"stop_reason: {result.stop_reason}  steps: {result.steps}")
+    ]), ToolRegistry([order_status_tool]), \
+        "Customer says order 88213 never arrived and their export is empty."
+
+
+def _demo_raw() -> None:
+    client, tools, question = _script()
+    result = run_agent(client, tools, question, caps=Caps())
+    print(f"engine: raw  stop_reason: {result.stop_reason}  steps: {result.steps}")
     print(f"answer: {result.answer}")
+
+
+def _demo_graph() -> None:
+    # The same agent on the real LangGraph StateGraph, driven by the same fake.
+    from supportagent.graph import run_graph_agent
+    client, tools, question = _script()
+    final = run_graph_agent(client, tools, question)
+    print(f"engine: graph  stop_reason: {final['stop_reason']}  steps: {final['steps']}")
+    print(f"answer: {final['answer']}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--level", default="v1", choices=["v1"])
+    parser.add_argument("--engine", default="raw", choices=["raw", "graph"],
+                        help="raw = the native-Python loop; graph = the same agent on LangGraph")
     args = parser.parse_args()
     if args.level == "v1":
-        _demo_v1()
+        _demo_graph() if args.engine == "graph" else _demo_raw()
 
 
 if __name__ == "__main__":

@@ -38,9 +38,20 @@ class DurableCrash(Exception):
 class AgentResult:
     answer: str
     steps: int
-    stop_reason: str  # "final" | "max_steps" | "loop_detected"
+    stop_reason: str  # "final" | "max_steps" | "loop_detected" | "budget_exceeded" | "blocked"
     transcript: list[Message] = field(default_factory=list)
     tracer: Tracer | None = None
+    tokens: int = 0  # prompt tokens spent over the run, for cost accounting
+
+    @property
+    def needed_human(self) -> bool:
+        """True when the agent stopped without resolving and a human must step in.
+
+        A clean final answer needs no runtime intervention; a ceiling, a stuck
+        loop, a budget cutoff, or a blocked output all hand the ticket back to a
+        person. This is the signal the eval harness turns into an intervention rate.
+        """
+        return self.stop_reason != "final"
 
 
 def run_agent(
@@ -70,6 +81,7 @@ def run_agent(
     """
     caps = caps or Caps()
     detector = LoopDetector(caps.loop_repeat_threshold)
+    spent_tokens = 0
 
     resumed = checkpointer.load(thread_id) if (checkpointer and thread_id) else None
     if resumed is not None:
@@ -82,17 +94,20 @@ def run_agent(
         ]
         start_step = 1
 
-    for step in range(start_step, caps.max_steps + 1):
+    try:
+      for step in range(start_step, caps.max_steps + 1):
         # Synchronous cost gate: stop before spending more, not after an alert.
         if budget and budget.exceeded():
-            return AgentResult("stopped: cost budget exceeded", step - 1, "budget_exceeded", transcript, tracer)
+            return AgentResult("stopped: cost budget exceeded", step - 1, "budget_exceeded", transcript, tracer, spent_tokens)
 
         # Curate the window before each call: keep it under the attention budget.
         if context_budget_tokens:
             transcript = compact(transcript, context_budget_tokens)
+        prompt_tokens = sum(estimate_tokens(m.content) for m in transcript)
+        spent_tokens += prompt_tokens
         response = client.complete(transcript, tools.schemas())
         if budget:
-            budget.charge(sum(estimate_tokens(m.content) for m in transcript))
+            budget.charge(prompt_tokens)
 
         if response.is_final:
             answer = response.final_text
@@ -101,11 +116,11 @@ def run_agent(
                 if not allowed:
                     answer = "I cannot share that."
                     transcript.append(Message(role="assistant", content=answer))
-                    return AgentResult(answer, step, "blocked", transcript, tracer)
+                    return AgentResult(answer, step, "blocked", transcript, tracer, spent_tokens)
             transcript.append(Message(role="assistant", content=answer))
             if tracer:
                 tracer.span("model", "model", input=user_message, output=answer)
-            return AgentResult(answer, step, "final", transcript, tracer)
+            return AgentResult(answer, step, "final", transcript, tracer, spent_tokens)
 
         call = response.tool_call
         call_id = f"call_{step}"
@@ -121,7 +136,7 @@ def run_agent(
             # becomes a bill.
             return AgentResult(
                 f"stopped: repeated {call.name} with no progress",
-                step, "loop_detected", transcript, tracer,
+                step, "loop_detected", transcript, tracer, spent_tokens,
             )
 
         observation = tools.run(call.name, call.args)
@@ -136,6 +151,10 @@ def run_agent(
             checkpointer.save(thread_id, transcript)
         if crash_after_step is not None and step == crash_after_step:
             raise DurableCrash(f"crashed after step {step}")
+    finally:
+        # Close the run's trace whichever way the loop exits (answer, ceiling, crash).
+        if tracer:
+            tracer.finish()
 
     # Ran out of steps without a final answer: the hard ceiling did its job.
-    return AgentResult("stopped: step ceiling reached", caps.max_steps, "max_steps", transcript, tracer)
+    return AgentResult("stopped: step ceiling reached", caps.max_steps, "max_steps", transcript, tracer, spent_tokens)

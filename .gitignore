@@ -4,3 +4,10 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .DS_Store
+
+# Langfuse self-host: real credentials + local data never get committed.
+langfuse/.env.langfuse
+*.sqlite
+
+# Local demo/checkpoint artifacts
+*.db
