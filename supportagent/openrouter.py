@@ -51,7 +51,7 @@ class OpenRouterClient:
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
-        max_tokens: int = 512,
+        max_tokens: int = 1024,
         temperature: float = 0.0,
         timeout: int = 60,
     ):
@@ -84,11 +84,19 @@ class OpenRouterClient:
             timeout=self.timeout,
         )
         resp.raise_for_status()
-        message = resp.json()["choices"][0]["message"]
+        choice = resp.json()["choices"][0]
+        message = choice["message"]
 
         tool_calls = message.get("tool_calls")
         if tool_calls:
             fn = tool_calls[0]["function"]
             args = json.loads(fn.get("arguments") or "{}")
             return LLMResponse(tool_call=ToolCall(name=fn["name"], args=args))
-        return LLMResponse(final_text=message.get("content") or "")
+
+        content = message.get("content") or ""
+        if not content and choice.get("finish_reason") == "length":
+            # A reasoning model can spend the whole token budget before emitting any
+            # answer. Surface that truncation instead of returning a silent empty
+            # final, which would look like a resolved ticket with no answer.
+            content = "(no answer: response truncated at max_tokens; raise max_tokens)"
+        return LLMResponse(final_text=content)
