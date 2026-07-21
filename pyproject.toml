@@ -1,0 +1,21 @@
+[project]
+name = "supportagent"
+version = "0.1.0"
+description = "Support-engineer agent, grown across the FDE M6 videos. Offline-testable, LangGraph + Langfuse."
+requires-python = ">=3.10"
+dependencies = [
+    # Runtime stack, introduced across the videos. Core loop and all tests run
+    # without these; they are needed only for the framework/tracing paths.
+    "langgraph>=0.2",     # V1 framework beat onward (agent runtime)
+    "langfuse>=2.0",      # V2 onward (traces, spans, eval backend)
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["supportagent*"]

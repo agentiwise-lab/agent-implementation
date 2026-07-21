@@ -1,0 +1,57 @@
+{
+  "790d4d17b9239f8a": {
+    "tool_call": {
+      "name": "get_order_status",
+      "args": {
+        "order_id": "88213"
+      }
+    }
+  },
+  "97d17938734f5e7c": {
+    "final_text": "Yes, order 88213 was delivered on July 19, 2026."
+  },
+  "7db39439c59a8e5d": {
+    "tool_call": {
+      "name": "get_order_status",
+      "args": {
+        "order_id": "88320"
+      }
+    }
+  },
+  "7e1b0d4aeab12c28": {
+    "final_text": "Order 88320 is currently processing."
+  },
+  "e63f8a6a29dca0d7": {
+    "tool_call": {
+      "name": "get_order_status",
+      "args": {
+        "order_id": "99999"
+      }
+    }
+  },
+  "a530863e71e0bbcd": {
+    "final_text": "The status of order 99999 is unknown."
+  },
+  "bd4c6f1b8171dbbd": {
+    "tool_call": {
+      "name": "get_account",
+      "args": {
+        "customer": "ACME"
+      }
+    }
+  },
+  "ea16c020678a9d11": {
+    "final_text": "Customer ACME is on the enterprise plan, which allows bulk CSV export with a row limit of 1,000,000."
+  },
+  "120806699fce5a2b": {
+    "tool_call": {
+      "name": "search_knowledge_base",
+      "args": {
+        "query": "large CSV exports empty"
+      }
+    }
+  },
+  "0eccb22830f02734": {
+    "final_text": "When a customer experiences empty CSV exports for large datasets, it is typically due to their account hitting the **plan's row limit**. \n\n### Why this happens:\n* **Row Limits:** The export system enforces row limits based on the customer's subscription plan. For example, customers on the **Starter plan** have a limit of **10,000 rows**.\n* **Behavior:** If an export exceeds this plan limit, the system returns an empty file rather than a truncated or partial one. This is expected behavior designed to prevent partial data confusion, not a system outage. (Enterprise accounts, by contrast, have effectively no row limit).\n\n### What to tell the customer:\n1. **Explain the Cause:** Let them know that the export is coming back empty because the dataset they are trying to export exceeds their plan's row limit.\n2. **Provide Solutions:**\n   * **Filter the Export:** Suggest they apply filters (such as narrower date ranges or specific categories) to reduce the export size to fewer rows so it falls within their plan's limit.\n   * **Upgrade Their Plan:** Inform them that they can upgrade their plan (e.g., to an Enterprise plan) to raise or"
+  }
+}

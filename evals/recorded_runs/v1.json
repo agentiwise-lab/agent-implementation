@@ -1,0 +1,41 @@
+{
+  "3d51c380ebbe2f86": {
+    "tool_call": {
+      "name": "get_order_status",
+      "args": {
+        "order_id": "88213"
+      }
+    }
+  },
+  "3cb1f28412da7508": {
+    "final_text": "Yes, order 88213 was delivered on July 19, 2026."
+  },
+  "d1a2989f13e907a0": {
+    "tool_call": {
+      "name": "get_order_status",
+      "args": {
+        "order_id": "88320"
+      }
+    }
+  },
+  "e5bf0bbfd765c6a2": {
+    "final_text": "The status of order 88320 is processing."
+  },
+  "a8360990e146a454": {
+    "tool_call": {
+      "name": "get_order_status",
+      "args": {
+        "order_id": "99999"
+      }
+    }
+  },
+  "80062c90e91f747c": {
+    "final_text": "The status of order 99999 is unknown as the order could not be found."
+  },
+  "7d2f0bfc1911b782": {
+    "final_text": ""
+  },
+  "a8017a19b26893eb": {
+    "final_text": "When large CSV exports return empty, it is typically due to one"
+  }
+}
