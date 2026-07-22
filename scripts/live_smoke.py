@@ -6,8 +6,8 @@ temperature 0, low max-tokens. Needs OPENROUTER_API_KEY in the env.
     OPENROUTER_API_KEY=... python scripts/live_smoke.py --level v1
     OPENROUTER_API_KEY=... python scripts/live_smoke.py --level v2   # instrumented + trace
 
-At v2 the run is instrumented: it goes through the loop the eval scores and emits
-a trace. If Langfuse credentials are set, the trace is exported to the
+At v2 the run is instrumented: it goes through the LangGraph agent the eval scores
+and emits a trace. If Langfuse credentials are set, the trace is exported to the
 self-hosted Langfuse; otherwise the spans print to the console.
 """
 
@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from supportagent import Caps, ToolRegistry, Tracer, run_agent, run_simple_agent
+from supportagent import Caps, ToolRegistry, Tracer, run_graph_agent, run_simple_agent
 from supportagent.openrouter import OpenRouterClient
 from supportagent.telemetry import flush_tracing, setup_langfuse
 from supportagent.tools.order_status import order_status_tool
@@ -43,7 +43,7 @@ def smoke_v2() -> bool:
     client = OpenRouterClient(max_tokens=400)
     tools = ToolRegistry([order_status_tool])
     tracer = Tracer(name="live-smoke-v2")
-    result = run_agent(client, tools, _QUESTION, caps=Caps(max_steps=6), tracer=tracer)
+    result = run_graph_agent(client, tools, _QUESTION, caps=Caps(max_steps=6), tracer=tracer)
     called_tool = any(m.role == "tool" for m in result.transcript)
     print(f"model_calls: {client.calls}  steps: {result.steps}  stop: {result.stop_reason}  tokens: {result.tokens}")
     print(f"called_tool: {called_tool}  needed_human: {result.needed_human}")
