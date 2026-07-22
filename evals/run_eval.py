@@ -26,7 +26,7 @@ from supportagent import (
     RecordingClient,
     ToolRegistry,
     Tracer,
-    run_agent,
+    run_graph_agent,
 )
 from supportagent.tools.account import account_tool
 from supportagent.tools.actions import CreditJournal, make_issue_credit_tool
@@ -72,7 +72,7 @@ def run(level: str, mode: str, trace: bool = False) -> int:
     rows = []
     for case in GOLDEN:
         tracer = Tracer(name=f"eval-{case.id}") if trace else None
-        result = run_agent(client, tools, case.question, tracer=tracer)
+        result = run_graph_agent(client, tools, case.question, tracer=tracer)
         row = score_case(result, case)
         row["reachable"] = reachable_at(case, level)
         rows.append(row)
