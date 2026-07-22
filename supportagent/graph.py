@@ -28,6 +28,7 @@ from langgraph.graph import END, StateGraph
 
 from .caps import Caps, LoopDetector
 from .llm import LLMClient, Message
+from .memory.store import Episode, LongTermStore
 from .telemetry import Tracer
 from .tools import ToolRegistry
 
@@ -36,6 +37,27 @@ def _estimate_tokens(text: str) -> int:
     """Rough token proxy (~4 chars per token). Enough for cost and regression
     tracking in the eval; the exact provider count is not the point here."""
     return max(1, len(text or "") // 4)
+
+
+def _recalled_context(store: LongTermStore, customer: str) -> str:
+    """Long-term memory for this customer, formatted for the system message.
+
+    Facts (semantic), the most recent past ticket (episodic), and the playbook
+    (procedural). Empty string when nothing is known, so a first-ever contact
+    reads exactly like the no-memory agent.
+    """
+    parts: list[str] = []
+    facts = store.facts(customer)
+    if facts:
+        parts.append("Known facts: " + ", ".join(f"{k}={v}" for k, v in facts.items()))
+    episodes = store.recall(customer)
+    if episodes:
+        last = episodes[-1]
+        parts.append(f"Last ticket for {customer}: {last.ticket} -> {last.resolution}")
+    playbook = store.playbook()
+    if playbook:
+        parts.append("Playbook:\n" + playbook)
+    return "\n".join(parts)
 
 
 @dataclass
@@ -145,17 +167,33 @@ def run_graph_agent(
     tracer: Tracer | None = None,
     checkpointer=None,
     thread_id: str = "default",
+    store: LongTermStore | None = None,
+    customer: str | None = None,
 ) -> AgentResult:
     """Run the LangGraph agent once and return the scored `AgentResult`.
 
     The recursion limit of 2*max_steps caps the agent/tools alternation, the
     framework's version of the raw loop's step ceiling. Pass a `tracer` to record
     a span per model and tool call.
+
+    Working memory and durable resume are LangGraph's own: pass a `checkpointer`
+    (for example a `SqliteSaver`) and a `thread_id` and the framework persists the
+    run each step and resumes the same thread. Pass a `store` and `customer` to
+    recall long-term memory into the system message at the open, and write the
+    resolved episode at the close.
     """
     caps = caps or Caps()
     app = build_agent_graph(client, tools, caps=caps, tracer=tracer, checkpointer=checkpointer)
+
+    system_content = system
+    if store and customer:
+        recalled = _recalled_context(store, customer)
+        if recalled:
+            system_content = f"{system}\n\n{recalled}"
+
     initial = {
-        "messages": [Message(role="system", content=system), Message(role="user", content=user_message)],
+        "messages": [Message(role="system", content=system_content),
+                     Message(role="user", content=user_message)],
         "steps": 0, "answer": "", "stop_reason": "", "tokens": 0,
     }
     config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 2 * caps.max_steps + 1}
@@ -171,7 +209,11 @@ def run_graph_agent(
         if tracer:
             tracer.finish()
 
-    return AgentResult(
+    result = AgentResult(
         answer=final["answer"], steps=final["steps"], stop_reason=final["stop_reason"],
         transcript=final["messages"], tracer=tracer, tokens=final["tokens"],
     )
+    # Write the resolved episode back to long-term memory.
+    if store and customer and result.stop_reason == "final":
+        store.add_episode(Episode(customer=customer, ticket=user_message, resolution=result.answer))
+    return result

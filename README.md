@@ -1,13 +1,14 @@
-# agent-implementation — 04_01_agentic_rag: retrieval the agent controls
+# agent-implementation — 05_01_memory: memory, within a session and across sessions
 
-The agent can act, but it still cannot reach the runbook knowledge that resolves
-a "why does this happen, what do we tell them" ticket. This branch is the code for
-M6 V4, agentic RAG. The point is control, not retrieval quality: retrieval is a
-tool the agent decides to call, judges the result of, and reformulates when the
-result is thin. The lecture teaches the story; this README is the code reference.
+The agent forgot everything the moment a run ended. This branch is the code for the
+memory half of M6 V5. Two kinds of memory, in two places on purpose: LangGraph's own
+checkpointer holds the running state and resumes a thread (durable state is a saver
+you pass to `compile()`, which is why the framework was worth adopting), and a
+`LongTermStore` recalls facts and past tickets across sessions. The lecture teaches
+the story; this README is the code reference.
 
-> Status: code complete and offline-green. The live `--mode record` recording
-> (`evals/recorded_runs/v4.json`) is pending an OpenRouter top-up; every offline
+> Status: code complete and offline-green. The `v5.json` eval recording (the gate
+> stays 5/5, memory adds no new golden tool) is pending an OpenRouter top-up; every
 > path below runs today with no key.
 
 ## Run it
@@ -15,64 +16,60 @@ result is thin. The lecture teaches the story; this README is the code reference
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e . && export PYTHONPATH=.
-pytest tests/test_retrieval.py         # real Chroma search + the no-match signal, offline
-python scripts/run_agent.py --level v4 # the corrective-search loop, offline (scripted model)
+pytest tests/test_memory.py            # recall, write, persistence, the checkpointer, offline
+python scripts/run_agent.py --level v5 # a second ticket opens knowing the first, offline
 ```
 
-## What retrieval control looks like (reproducible, offline)
+## What memory looks like (reproducible, offline)
 
 ```
-$ python scripts/run_agent.py --level v4
-corrective search (a thin result becomes a signal to reformulate):
-  search -> no matching runbook; try a different query
-  search -> [csv-export]
-answer: Large CSV exports come back empty because the export hits the plan row
-        limit (10,000 rows on starter). ...
+$ python scripts/run_agent.py --level v5
+ticket 1 resolved and written to long-term memory:
+  episode: What plan is ACME on? -> ACME is on the enterprise plan and allows bulk CSV export.
+
+ticket 2 for ACME opens with this recalled into its system message:
+  Last ticket for ACME: What plan is ACME on? -> ACME is on the enterprise plan ...
 ```
 
-The knowledge base is a real Chroma collection with local ONNX embeddings, so
-search is by meaning. A query the runbooks do not cover ("the weather in Tokyo
-tomorrow") lands past the cosine-distance threshold (about 1.03 > 0.9) and returns
-the no-match signal, so the agent reformulates instead of answering from a
-confidently irrelevant chunk.
+The first ticket's resolution is written as an episode; the next ticket for ACME
+opens with it recalled into the system message, so the agent starts already knowing
+the account instead of from zero.
 
 ## What's implemented here
 
-Retrieval as a controlled, judgeable tool: a real vector store, a distance
-threshold that turns a weak nearest-neighbour into an explicit "no match"
-observation, and the corrective loop (reformulate, capped by the same loop
-detector and step ceiling). Search is just another `Tool`, so it flows through the
-registry and the loop exactly like `get_account`; nothing in the loop is
-retrieval-specific. Retrieval quality (chunking, hybrid search, reranking) is a
-different subject and is deliberately out of scope: whole-file docs, default
-embeddings, k=2, no reranker.
+- **Working memory + durable resume: LangGraph's checkpointer, not a hand-rolled
+  one.** `build_agent_graph(..., checkpointer=SqliteSaver(...))` persists the run
+  each step; a fresh graph instance on the same saver + `thread_id` sees the
+  persisted transcript. This is the framework carrying the state the raw loop kept
+  by hand.
+- **Long-term memory: a `LongTermStore` on SQLite**, three kinds honestly scoped:
+  semantic facts, episodic past tickets, and a procedural playbook. Recalled into the
+  system message at the open of a run (`run_graph_agent(store=, customer=)`) and
+  written as an episode on resolution. Persistence is genuine: a fresh store reads
+  what a prior process wrote.
 
 ## Components
 
 | File · lines | What it is | Why it exists |
 | --- | --- | --- |
-| `supportagent/retrieval.py` L28-L55 · `KnowledgeBase.search` | a real Chroma store over the runbooks; returns hits under the distance threshold | search by meaning, with a floor on relevance |
-| `supportagent/retrieval.py` L24 · `_MAX_DISTANCE = 0.9` | the cosine-distance cutoff | above it, a hit is treated as no real match |
-| `supportagent/retrieval.py` L57-L78 · `make_search_tool`, `search_knowledge_base` | the tool; an empty result returns the no-match signal | a thin result becomes a correctable observation |
-| `corpus/runbooks/csv-export.md` | the runbook that answers G-05 | the row-limit cause the agent must retrieve |
-| `evals/run_eval.py` L43-L57 · `tools_for_level` | registers `search_knowledge_base` at v4 | the search that closes the G-05 gap |
+| `supportagent/graph.py` L161-L219 · `run_graph_agent` memory seam | recalls long-term memory into the system message at the open, writes the episode at the close | memory is two hooks around the same graph |
+| `supportagent/graph.py` L42-L60 · `_recalled_context` | formats facts + last episode + playbook for the system message | empty when nothing is known, so a first contact reads like the no-memory agent |
+| `supportagent/memory/store.py` L39-L66 · `put_fact`/`facts`, `add_episode`/`recall` | semantic and episodic memory on SQLite | facts and past tickets survive the process |
+| `supportagent/memory/store.py` L68-L75 · `learn`/`playbook` | the procedural playbook the agent rewrites for itself | prompt-level procedure, deliberately modest |
+| the checkpointer (LangGraph `SqliteSaver`) | working state + durable resume, passed to `compile()` | the framework's job, not ours |
 
 ## The decision this teaches
 
-- **When does the agent search, and when does it just answer?** A fact keyed by an
-  id (an order, an account) is a direct tool call; a "why does this happen, what is
-  the policy" question is a documented cause in a runbook with no id, and that is
-  what triggers a search. Do not retrieve when a direct lookup or the model's own
-  reasoning already answers it.
-- **A thin result is a signal, not an answer.** The distance threshold is what makes
-  a weak match say "no match" so the agent can reformulate. Without it, a vector
-  store always returns its nearest neighbour, however irrelevant.
-- **Cap the correction.** A reformulated query is progress; the identical query
-  repeated is a loop, and the loop detector plus the step ceiling bound it.
+- **Which memory type?** Semantic for durable facts (a plan, a preference), episodic
+  for "have we seen this before", procedural for "how we handle this". Working memory
+  (the transcript) is the checkpointer's, not the store's.
+- **When to reach for a framework here.** Durable resume, human-in-the-loop pauses,
+  and persisted state are exactly what LangGraph's checkpointer gives you as an
+  argument; hand-rolling them onto a raw loop is the undifferentiated code the
+  framework exists to carry.
 
 ## Not here yet
 
-- **Memory and durable execution** (`05_*`): the agent remembers across sessions and
-  survives a crash mid-action.
-- Retrieval quality machinery (chunking, hybrid BM25+dense, reranking) is a separate
-  subject, not this one.
+- **Durable execution** (`05_02_durable`): a crash mid-action resumes without
+  re-running the side effect, safe because the write is idempotent.
+- Context engineering, orchestration, security, and ops, from V6 on.

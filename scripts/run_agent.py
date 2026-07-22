@@ -8,6 +8,7 @@ Offline by default: a scripted fake model drives the agent with no key.
     python scripts/run_agent.py --level v2               # the LangGraph agent + a trace
     python scripts/run_agent.py --level v3               # idempotency + the authz boundary
     python scripts/run_agent.py --level v4               # the corrective-search loop
+    python scripts/run_agent.py --level v5               # long-term memory: recall across tickets
 """
 
 from __future__ import annotations
@@ -95,13 +96,35 @@ def _rag() -> None:
     print(f"\nanswer: {result.answer}")
 
 
+def _memory() -> None:
+    # Long-term memory, shown offline: a first ticket is written, and the next
+    # ticket for the same customer opens already knowing it.
+    from supportagent import LongTermStore
+    from supportagent.graph import _recalled_context
+
+    store = LongTermStore()
+    tools = ToolRegistry([order_status_tool])
+    run_graph_agent(
+        FakeLLMClient(["ACME is on the enterprise plan and allows bulk CSV export."]),
+        tools, "What plan is ACME on?", store=store, customer="ACME",
+    )
+    print("ticket 1 resolved and written to long-term memory:")
+    for ep in store.recall("ACME"):
+        print(f"  episode: {ep.ticket} -> {ep.resolution}")
+    print("\nticket 2 for ACME opens with this recalled into its system message:")
+    for line in _recalled_context(store, "ACME").splitlines():
+        print(f"  {line}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--level", default="v1", choices=["v1", "v2", "v3", "v4"])
+    parser.add_argument("--level", default="v1", choices=["v1", "v2", "v3", "v4", "v5"])
     parser.add_argument("--engine", default="raw", choices=["raw", "graph"],
                         help="raw = the native-Python loop (V1 artifact); graph = the LangGraph agent")
     args = parser.parse_args()
-    if args.level == "v4":
+    if args.level == "v5":
+        _memory()
+    elif args.level == "v4":
         _rag()
     elif args.level == "v3":
         _tools()

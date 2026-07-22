@@ -1,8 +1,8 @@
 """supportagent: one agent, grown across the FDE M6 videos.
 
-This branch (02_01_eval) instruments the loop so it can be measured: a structured
-`AgentResult` the harness grades, and a `Tracer` that turns a run into a trace.
-Import from here, not from internals.
+This branch (05_01_memory) gives the agent memory: LangGraph's own checkpointer
+holds working state and resumes a thread, and a `LongTermStore` recalls facts and
+past tickets across sessions. Import from here, not from internals.
 """
 
 from .caps import Caps, LoopDetector
@@ -17,6 +17,7 @@ from .llm import (
     transcript_key,
 )
 from .graph import AgentResult, build_agent_graph, run_graph_agent
+from .memory import Episode, LongTermStore
 from .simple_agent import SimpleResult, run_simple_agent
 from .telemetry import Span, Trace, Tracer
 from .tools import Tool, ToolRegistry
@@ -35,6 +36,8 @@ __all__ = [
     "AgentResult",
     "run_graph_agent",
     "build_agent_graph",
+    "Episode",
+    "LongTermStore",
     "SimpleResult",
     "run_simple_agent",
     "Span",
