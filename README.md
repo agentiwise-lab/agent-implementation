@@ -116,6 +116,28 @@ export PYTHONPATH=.
 pytest        # all offline, no API key required
 ```
 
+## Verify it works
+
+Two surfaces, by audience.
+
+**Offline, no key** (what the lectures link, reproducible by anyone who clones the repo):
+
+```bash
+pytest                                                 # the whole suite
+python scripts/demo.py --level vN                      # a real demo for any level v1..v10
+python -m evals.run_eval --level v4 --mode recorded    # score a level offline against a committed recording
+```
+
+**Live, against a real model** (needs `OPENROUTER_API_KEY`; drives OpenRouter):
+
+```bash
+python scripts/verify_live_per_lecture.py              # one live conversation per lecture, checked to scope
+python scripts/verify_live_per_lecture.py v4 v8        # just these lectures
+python scripts/verify_live_e2e.py                      # a full-stack live run, verified to land in Langfuse
+```
+
+`verify_live_per_lecture.py` is the **current-state check**. For each capability level it sends the real model a ticket that exercises exactly what that lecture teaches, prints `ticket -> tool calls -> answer`, and asserts the behaviour the lecture claims: the loop answers, the action is idempotent on retry, retrieval self-corrects, a crashed run resumes exactly once, the agent stays correct under a compacted window, the authz boundary blocks in code, the cost gate stops the run before the ceiling. Each run emits a Langfuse trace named `lecture-vN`, so with the stack up (below) you get one browsable trace per lecture. This is how the repo shows, at any moment, that the agent still does what the module says it does.
+
 ## Tracing with Langfuse (self-hosted)
 
 Traces are real OpenTelemetry spans, and Langfuse ingests OpenTelemetry. You can run the whole Langfuse stack locally with Docker and see the agent's runs in its UI. Credentials are **codified**, so there is no manual click-through: the compose file seeds an org, a project, a login user, and the project's API keys on first boot.

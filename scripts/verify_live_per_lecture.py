@@ -186,11 +186,18 @@ LEVELS = {"v1": v1, "v2": v2, "v3": v3, "v4": v4, "v5": v5,
 
 
 def main() -> int:
+    import argparse
+    parser = argparse.ArgumentParser(description="One live conversation per lecture, checked to scope.")
+    parser.add_argument("levels", nargs="*", help="levels to run, e.g. v3 v8 (default: all)")
+    parser.add_argument("--level", action="append", default=[], dest="level_flags",
+                        help="alternatively pass --level v3 --level v8")
+    args = parser.parse_args()
+
     if not os.environ.get("OPENROUTER_API_KEY"):
         print("OPENROUTER_API_KEY not set."); return 2
     setup_tracing()
     print(f"langfuse wired: {setup_langfuse()}")
-    which = [a for a in sys.argv[1:] if a in LEVELS] or list(LEVELS)
+    which = [a for a in (args.levels + args.level_flags) if a in LEVELS] or list(LEVELS)
     for lvl in which:
         try:
             LEVELS[lvl]()
