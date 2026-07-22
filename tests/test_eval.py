@@ -4,7 +4,7 @@ Behavior under test:
 - the judge accepts alternative phrasings of one concept (date formats)
 - tool-correctness reads the trajectory, not the answer
 - an empty final never scores as a pass, even when a substring judge is absent
-- the recorded gate is green on reachable cases and the baseline fails as designed
+- the recorded gate replays offline and is green on the golden set
 """
 
 from supportagent import AgentResult, Message
@@ -42,22 +42,22 @@ def test_tool_correctness_reads_the_trajectory():
 
 
 def test_reaching_for_a_missing_tool_is_not_calling_it():
-    # The model tried to call get_account, but there is no get_account: the
-    # registry returned "error: no such tool". That is the gap, not a call, so it
-    # scores as tool-incorrect and names get_account as the first miss.
-    case = GoldenCase(id="G-04", question="q", expected_tools=["get_account"])
-    errored = _result("I cannot check that.", "get_account")
-    errored.transcript[1].content = "error: no such tool 'get_account'"
+    # A model can try to call a tool the registry does not have; the registry
+    # returns "error: no such tool". That is the agent reaching for a capability
+    # it lacks, not a call, so it scores as tool-incorrect and names the miss.
+    case = GoldenCase(id="x", question="q", expected_tools=["some_tool"])
+    errored = _result("I cannot check that.", "some_tool")
+    errored.transcript[1].content = "error: no such tool 'some_tool'"
     assert not tool_correctness(errored, case)
-    assert first_upstream_failure(errored, case) == "get_account"
+    assert first_upstream_failure(errored, case) == "some_tool"
 
 
 def test_first_upstream_failure_names_the_earliest_missing_tool():
-    case = GoldenCase(id="x", question="q", expected_tools=["get_account", "search_knowledge_base"])
+    case = GoldenCase(id="x", question="q", expected_tools=["tool_a", "tool_b"])
     # Nothing called: the first expected tool is where the path broke.
-    assert first_upstream_failure(_result("ans", None), case) == "get_account"
+    assert first_upstream_failure(_result("ans", None), case) == "tool_a"
     # First called, second missing: the break is the second tool.
-    assert first_upstream_failure(_result("ans", "get_account"), case) == "search_knowledge_base"
+    assert first_upstream_failure(_result("ans", "tool_a"), case) == "tool_b"
 
 
 def test_score_case_surfaces_intervention_signal():
@@ -82,7 +82,7 @@ def test_empty_final_never_scores_as_a_pass():
     assert score_case(_result("", "get_order_status"), open_case)["success"] is False
 
 
-def test_recorded_gate_is_green_and_baseline_fails():
-    # The committed recording replays offline; reachable cases pass, unreachable
-    # baseline cases fail by design, so the gate passes.
+def test_recorded_gate_is_green():
+    # The committed recording replays offline with no key; every golden case
+    # resolves, so the gate passes.
     assert run(level="v2", mode="recorded") == 0
