@@ -28,6 +28,8 @@ from supportagent import (
     Tracer,
     run_agent,
 )
+from supportagent.tools.account import account_tool
+from supportagent.tools.actions import CreditJournal, make_issue_credit_tool
 from supportagent.tools.order_status import order_status_tool
 
 from .golden import GOLDEN, reachable_at
@@ -39,9 +41,14 @@ _LEVELS = ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10"]
 
 
 def tools_for_level(level: str) -> ToolRegistry:
-    # The agent has one tool at this level: order status. Later capabilities add
-    # the account lookup and the runbook search on top.
-    return ToolRegistry([order_status_tool])
+    # Capabilities compose: each level adds tools on top of the ones before it.
+    reg = ToolRegistry([order_status_tool])
+    if _LEVELS.index(level) >= _LEVELS.index("v3"):
+        # The account lookup closes the G-04 gap; issue_credit is the write tool
+        # whose idempotency is enforced in code.
+        reg.register(account_tool)
+        reg.register(make_issue_credit_tool(CreditJournal()))
+    return reg
 
 
 def _client(mode: str, level: str):
@@ -50,9 +57,9 @@ def _client(mode: str, level: str):
         return RecordedLLMClient(rec), None
     from supportagent.openrouter import OpenRouterClient
 
-    # Enough budget that a reasoning model finishes its turn; the truncation guard
-    # in the client still covers the case where a model overruns it.
-    live = OpenRouterClient(max_tokens=1024, temperature=0.0)
+    # Frugal budget for the recording pass; enough for a tool call and a short
+    # answer, and the truncation guard in the client covers an overrun.
+    live = OpenRouterClient(max_tokens=512, temperature=0.0)
     if mode == "record":
         wrapped = RecordingClient(live)
         return wrapped, wrapped

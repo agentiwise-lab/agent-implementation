@@ -54,13 +54,41 @@ def _instrumented() -> None:
         print(f"  [{span.kind}] {span.name}: {span.output[:70]}")
 
 
+def _tools() -> None:
+    # Tool architecture, shown offline: an idempotent write and the authz boundary.
+    from supportagent.tools.actions import CreditJournal, make_issue_credit_tool
+    from supportagent.security.authz import AuthzPolicy, Principal, enforce_authz
+
+    journal = CreditJournal()
+    credit = make_issue_credit_tool(journal)
+
+    # A retry issues the same logical credit twice; the idempotency key makes the
+    # second call a no-op replay, so the world changes once.
+    key = "ticket-4417-refund"
+    print("issue_credit x2 with the same key (a retry):")
+    print("  1:", credit.run({"customer": "ACME", "amount": 50.0, "idempotency_key": key}))
+    print("  2:", credit.run({"customer": "ACME", "amount": 50.0, "idempotency_key": key}))
+    print(f"  journal.count() == {journal.count()}   # one credit, not two")
+
+    # The control boundary: a customer principal is denied in code, whatever the
+    # model or the ticket text says.
+    policy = AuthzPolicy()
+    customer = Principal(id="u1", role="customer", tenant="ACME")
+    guarded = enforce_authz(credit, customer, policy)
+    print("\ncustomer asks the agent to issue itself $5000:")
+    print("  ", guarded.run({"customer": "ACME", "amount": 5000.0, "idempotency_key": "z"}))
+    print(f"  journal.count() == {journal.count()}   # still one; the payout never happened")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--level", default="v1", choices=["v1", "v2"])
+    parser.add_argument("--level", default="v1", choices=["v1", "v2", "v3"])
     parser.add_argument("--engine", default="raw", choices=["raw", "graph"],
                         help="raw = the native-Python loop; graph = the same agent on LangGraph")
     args = parser.parse_args()
-    if args.level == "v2":
+    if args.level == "v3":
+        _tools()
+    elif args.level == "v2":
         _instrumented()
     elif args.engine == "graph":
         _graph()

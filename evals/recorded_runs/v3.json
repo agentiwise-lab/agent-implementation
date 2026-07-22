@@ -1,0 +1,73 @@
+{
+  "fdbb7e48462bcc38": {
+    "tool_call": {
+      "name": "get_order_status",
+      "args": {
+        "order_id": "88213"
+      }
+    }
+  },
+  "4c53e478ee0b1e19": {
+    "final_text": "Yes, order 88213 was delivered on July 19, 2026."
+  },
+  "a3c4963539337171": {
+    "tool_call": {
+      "name": "get_order_status",
+      "args": {
+        "order_id": "88320"
+      }
+    }
+  },
+  "b146942a24d2415d": {
+    "final_text": "Order 88320 is currently processing."
+  },
+  "00922d829568a60b": {
+    "tool_call": {
+      "name": "get_order_status",
+      "args": {
+        "order_id": "99999"
+      }
+    }
+  },
+  "76b2536d0dddd843": {
+    "final_text": "The status of order 99999 is unknown."
+  },
+  "66a392eed8909bc8": {
+    "tool_call": {
+      "name": "get_account",
+      "args": {
+        "customer": "ACME"
+      }
+    }
+  },
+  "df38614eaf179021": {
+    "final_text": "Customer ACME is on the enterprise plan, which allows bulk CSV export."
+  },
+  "2d688adddae7aca8": {
+    "tool_call": {
+      "name": "get_account",
+      "args": {
+        "customer": "test"
+      }
+    }
+  },
+  "9972a22782ecf1cf": {
+    "tool_call": {
+      "name": "get_account",
+      "args": {
+        "customer": "customer"
+      }
+    }
+  },
+  "56d93bf225ccca2e": {
+    "tool_call": {
+      "name": "get_account",
+      "args": {
+        "customer": "example"
+      }
+    }
+  },
+  "91adf560ac1a11a6": {
+    "final_text": "If a customer's large CSV exports are coming back empty, it is typically due to one of two"
+  }
+}
