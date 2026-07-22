@@ -50,7 +50,9 @@ def _client(mode: str, level: str):
         return RecordedLLMClient(rec), None
     from supportagent.openrouter import OpenRouterClient
 
-    live = OpenRouterClient(max_tokens=400, temperature=0.0)
+    # Enough budget that a reasoning model finishes its turn; the truncation guard
+    # in the client still covers the case where a model overruns it.
+    live = OpenRouterClient(max_tokens=1024, temperature=0.0)
     if mode == "record":
         wrapped = RecordingClient(live)
         return wrapped, wrapped

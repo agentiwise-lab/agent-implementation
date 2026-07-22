@@ -41,6 +41,17 @@ def test_tool_correctness_reads_the_trajectory():
     assert not tool_correctness(_result("ans", None), case)
 
 
+def test_reaching_for_a_missing_tool_is_not_calling_it():
+    # The model tried to call get_account, but there is no get_account: the
+    # registry returned "error: no such tool". That is the gap, not a call, so it
+    # scores as tool-incorrect and names get_account as the first miss.
+    case = GoldenCase(id="G-04", question="q", expected_tools=["get_account"])
+    errored = _result("I cannot check that.", "get_account")
+    errored.transcript[1].content = "error: no such tool 'get_account'"
+    assert not tool_correctness(errored, case)
+    assert first_upstream_failure(errored, case) == "get_account"
+
+
 def test_first_upstream_failure_names_the_earliest_missing_tool():
     case = GoldenCase(id="x", question="q", expected_tools=["get_account", "search_knowledge_base"])
     # Nothing called: the first expected tool is where the path broke.

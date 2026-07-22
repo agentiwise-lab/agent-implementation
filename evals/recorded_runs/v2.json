@@ -30,12 +30,20 @@
     }
   },
   "80062c90e91f747c": {
-    "final_text": "The status of order 99999 is unknown as the order could not be found."
+    "final_text": "The status of order 99999 is unknown."
   },
   "7d2f0bfc1911b782": {
-    "final_text": "(no answer: response truncated at max_tokens; raise max_tokens)"
+    "tool_call": {
+      "name": "get_account",
+      "args": {
+        "name": "ACME"
+      }
+    }
+  },
+  "7c3c0ccfda683f8b": {
+    "final_text": "I am unable to determine ACME's plan or whether it allows bulk CSV export because the `get_account` tool is not available."
   },
   "a8017a19b26893eb": {
-    "final_text": "When large CSV exports return empty, it is typically due to one"
+    "final_text": "Based on standard engineering and support runbooks for SaaS platforms, here is why large CSV exports often come back empty, followed by a guide on how to communicate this to the customer.\n\n---"
   }
 }

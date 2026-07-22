@@ -20,7 +20,18 @@ from .golden import GoldenCase
 
 
 def tools_called(result: AgentResult) -> list[str]:
-    return [m.tool_name for m in result.transcript if m.role == "tool"]
+    """The tools the agent actually ran, in order.
+
+    A call to a tool that does not exist comes back as an "error: no such tool"
+    observation; that is the agent reaching for a capability it does not have, not
+    the tool being called, so it does not count. This is what lets
+    first_upstream_failure name a missing tool even when the model tried to invoke
+    it: trying to call get_account when there is no get_account is exactly the gap.
+    """
+    return [
+        m.tool_name for m in result.transcript
+        if m.role == "tool" and not (m.content or "").startswith("error: no such tool")
+    ]
 
 
 def tool_correctness(result: AgentResult, case: GoldenCase) -> bool:
