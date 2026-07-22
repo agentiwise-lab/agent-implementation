@@ -52,11 +52,11 @@ def _report(level, scope, ticket, result, ok, note=""):
     RESULTS.append((level, ok, scope))
 
 
-def v1():  # the loop: call -> act -> observe -> answer
-    scope = "bare loop calls one tool and answers"
+def v1():  # the smallest agent: the raw loop, call -> act -> observe -> answer
+    from supportagent import run_simple_agent
+    scope = "the smallest agent (raw loop) calls one tool and answers"
     ticket = "Is order 88213 delivered? Use get_order_status, then answer in one sentence."
-    r = run_agent(_client(), ToolRegistry([order_status_tool]), ticket,
-                  caps=Caps(max_steps=6), tracer=Tracer("lecture-v1"))
+    r = run_simple_agent(_client(), ToolRegistry([order_status_tool]), ticket, caps=Caps(max_steps=6))
     ok = "get_order_status" in _calls(r) and "deliver" in (r.answer or "").lower() and r.stop_reason == "final"
     _report("v1", scope, ticket, r, ok)
 

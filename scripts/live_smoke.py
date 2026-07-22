@@ -11,19 +11,20 @@ from __future__ import annotations
 import argparse
 import sys
 
-from supportagent import Caps, ToolRegistry, run_agent
+from supportagent import Caps, ToolRegistry, run_agent, run_simple_agent
 from supportagent.openrouter import OpenRouterClient
 from supportagent.tools.order_status import order_status_tool
 
 
 def smoke_v1() -> bool:
+    # V1 is the smallest agent: the raw loop, driven by a real model.
     client = OpenRouterClient(max_tokens=400)
     tools = ToolRegistry([order_status_tool])
     question = (
         "A customer asks: is my order 88213 delivered? "
         "Use the get_order_status tool to check, then answer in one sentence."
     )
-    result = run_agent(client, tools, question, caps=Caps(max_steps=6))
+    result = run_simple_agent(client, tools, question, caps=Caps(max_steps=6))
     called_tool = any(m.role == "tool" for m in result.transcript)
     print(f"model_calls: {client.calls}  steps: {result.steps}  stop: {result.stop_reason}")
     print(f"called_tool: {called_tool}")

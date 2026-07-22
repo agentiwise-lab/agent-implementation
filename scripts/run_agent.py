@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 
-from supportagent import Caps, FakeLLMClient, ToolCall, ToolRegistry, run_agent
+from supportagent import Caps, FakeLLMClient, ToolCall, ToolRegistry, run_simple_agent
 from supportagent.tools.order_status import order_status_tool
 
 
@@ -26,8 +26,9 @@ def _script():
 
 
 def _demo_raw() -> None:
+    # V1 runs the smallest agent, the raw loop with nothing hidden behind it.
     client, tools, question = _script()
-    result = run_agent(client, tools, question, caps=Caps())
+    result = run_simple_agent(client, tools, question, caps=Caps())
     print(f"engine: raw  stop_reason: {result.stop_reason}  steps: {result.steps}")
     print(f"answer: {result.answer}")
 

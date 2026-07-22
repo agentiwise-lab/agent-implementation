@@ -47,7 +47,8 @@ agent-implementation/
   README.md
   pyproject.toml  pytest.ini
   supportagent/
-    loop.py             # V1  the while-loop: call -> act -> observe -> repeat; token accounting
+    simple_agent.py     # V1  the smallest agent: the raw loop from scratch, nothing hidden
+    loop.py             # the same loop grown: tracing, memory, durability, cost hooks (V2 on)
     caps.py             # V1  step ceiling + loop detection on the unit of work
     llm.py              # V1  model contract + FakeLLMClient + Recorded/Recording clients
     openrouter.py       # V1  live OpenAI-compatible client (OpenRouter)
