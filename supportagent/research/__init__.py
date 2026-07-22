@@ -11,5 +11,24 @@ graph, the tool loop, caps, tracing); only the domain and the workflow are new.
 
 from .subagent import make_research_subagent, research_tools
 from .tools import fetch_tool, web_search_tool
+from .workflow import (
+    ResearchRun,
+    WorkerResult,
+    build_research_workflow,
+    classify_research,
+    run_research_workflow,
+    start_research,
+)
 
-__all__ = ["make_research_subagent", "research_tools", "fetch_tool", "web_search_tool"]
+__all__ = [
+    "make_research_subagent",
+    "research_tools",
+    "fetch_tool",
+    "web_search_tool",
+    "ResearchRun",
+    "WorkerResult",
+    "build_research_workflow",
+    "classify_research",
+    "run_research_workflow",
+    "start_research",
+]
