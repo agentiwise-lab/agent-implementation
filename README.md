@@ -56,9 +56,9 @@ can never score as a pass.
 | `supportagent/telemetry.py` L109-L138 · `Tracer` | one OpenTelemetry span per model/tool call, one trace per run | a run becomes a tree you open in Langfuse |
 | `supportagent/openrouter.py` L96-L102 · truncation guard | empty content at `finish_reason=="length"` becomes a visible notice | a silent empty final looked like a resolved ticket |
 | `evals/golden.py` L16-L72 · `GoldenCase`, `GOLDEN`, `reachable_at` | five cases mined from resolved tickets, each with the tools + answer it needs | the fixed set the gate scores against |
-| `evals/trajectory.py` L26-L82 · `tool_correctness`, `first_upstream_failure`, `answer_nonempty`, `score_case` | score the path, name the first missing tool, refuse an empty final | reading the path separates a retrieval bug from a generation bug |
+| `evals/trajectory.py` L37-L98 · `tool_correctness`, `first_upstream_failure`, `answer_nonempty`, `score_case` | score the path, name the first missing tool, refuse an empty final | reading the path separates a retrieval bug from a generation bug |
 | `evals/judge.py` L16-L25 · `llm_judge` | a second model grades answers a substring cannot | for paraphrases and judgement calls, used sparingly |
-| `evals/run_eval.py` L60-L108 · `run`, the gate | runs the set, prints per-case + three metrics, gates on reachable cases | the multi-metric gate every later capability opens against |
+| `evals/run_eval.py` L62-L110 · `run`, the gate | runs the set, prints per-case + three metrics, gates on reachable cases | the multi-metric gate every later capability opens against |
 
 ## Example tickets
 
