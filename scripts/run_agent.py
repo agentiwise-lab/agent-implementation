@@ -1,19 +1,18 @@
-"""Run the agent offline: the raw loop, the same loop on LangGraph, or the
-instrumented loop that the eval scores.
+"""Run the agent offline: the raw loop that taught the mechanism, or the
+LangGraph agent the rest of the module grows.
 
-Offline by default: a scripted fake model drives the loop with no key. The same
-scripted model, the same tools, drive every engine unchanged.
+Offline by default: a scripted fake model drives the agent with no key.
 
-    python scripts/run_agent.py --level v1                 # the raw loop
-    python scripts/run_agent.py --level v1 --engine graph  # the same loop on LangGraph
-    python scripts/run_agent.py --level v2                 # the instrumented loop + a trace
+    python scripts/run_agent.py --level v1               # the raw loop (V1 artifact)
+    python scripts/run_agent.py --level v1 --engine graph  # the same agent on LangGraph
+    python scripts/run_agent.py --level v2               # the LangGraph agent + a trace
 """
 
 from __future__ import annotations
 
 import argparse
 
-from supportagent import Caps, FakeLLMClient, ToolCall, ToolRegistry, Tracer, run_agent, run_simple_agent
+from supportagent import Caps, FakeLLMClient, ToolCall, ToolRegistry, Tracer, run_graph_agent, run_simple_agent
 from supportagent.tools.order_status import order_status_tool
 
 
@@ -32,38 +31,31 @@ def _raw() -> None:
     print(f"answer: {result.answer}")
 
 
-def _graph() -> None:
-    # The same agent on the real LangGraph StateGraph, driven by the same fake.
-    from supportagent.graph import run_graph_agent
+def _graph(traced: bool) -> None:
+    # The LangGraph agent, driven by the same fake. With a tracer it is the run the
+    # eval scores: a structured result and a span per call.
     client, tools, question = _script()
-    final = run_graph_agent(client, tools, question)
-    print(f"engine: graph  stop_reason: {final['stop_reason']}  steps: {final['steps']}")
-    print(f"answer: {final['answer']}")
-
-
-def _instrumented() -> None:
-    # The loop the eval scores: a structured result and a trace of every call.
-    client, tools, question = _script()
-    tracer = Tracer(name="run-agent")
-    result = run_agent(client, tools, question, caps=Caps(), tracer=tracer)
-    print(f"engine: loop  stop_reason: {result.stop_reason}  steps: {result.steps}  tokens: {result.tokens}")
+    tracer = Tracer(name="run-agent") if traced else None
+    result = run_graph_agent(client, tools, question, caps=Caps(), tracer=tracer)
+    print(f"engine: graph  stop_reason: {result.stop_reason}  steps: {result.steps}  tokens: {result.tokens}")
     print(f"needed_human: {result.needed_human}")
     print(f"answer: {result.answer}")
-    print("trace:")
-    for span in result.tracer.trace.spans:
-        print(f"  [{span.kind}] {span.name}: {span.output[:70]}")
+    if tracer:
+        print("trace:")
+        for span in result.tracer.trace.spans:
+            print(f"  [{span.kind}] {span.name}: {span.output[:70]}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--level", default="v1", choices=["v1", "v2"])
     parser.add_argument("--engine", default="raw", choices=["raw", "graph"],
-                        help="raw = the native-Python loop; graph = the same agent on LangGraph")
+                        help="raw = the native-Python loop (V1 artifact); graph = the LangGraph agent")
     args = parser.parse_args()
     if args.level == "v2":
-        _instrumented()
+        _graph(traced=True)
     elif args.engine == "graph":
-        _graph()
+        _graph(traced=False)
     else:
         _raw()
 
