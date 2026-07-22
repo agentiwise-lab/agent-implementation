@@ -61,4 +61,8 @@ def strip_exfil_links(report: str, allowed_domains: list[str] | None = None) -> 
     # reference-style definitions: [id]: url
     out = re.sub(r"(?m)^\s*\[[^\]]+\]:\s*(\S+).*$",
                  lambda m: m.group(0) if _ok(m.group(1)) else "", out)
+    # any remaining bare URL to a non-allowlisted domain: a report should carry only
+    # vetted citations, so an unvetted URL, even in prose, does not ship.
+    out = re.sub(r"https?://\S+",
+                 lambda m: m.group(0) if _ok(m.group(0)) else "[link removed]", out)
     return out

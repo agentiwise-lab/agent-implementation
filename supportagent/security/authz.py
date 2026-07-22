@@ -31,6 +31,15 @@ class AuthzPolicy:
             return principal.role == "internal"
         return True
 
+    def can_access(self, principal: Principal, resource_tenant: str) -> bool:
+        """Multi-tenant isolation: a principal may only reach its own tenant's data.
+
+        A research subagent runs on behalf of one tenant; even a fully fooled model
+        cannot read another tenant's resources, because the tenant match is checked
+        in code, not decided by the model.
+        """
+        return principal.tenant == resource_tenant
+
 
 def enforce_authz(tool: Tool, principal: Principal, policy: AuthzPolicy) -> Tool:
     """Wrap a tool so the policy is checked in code before it executes.
