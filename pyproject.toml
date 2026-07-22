@@ -4,9 +4,10 @@ version = "0.1.0"
 description = "Support-engineer agent, grown across the FDE M6 videos. Offline-testable, LangGraph + Langfuse."
 requires-python = ">=3.10"
 dependencies = [
-    # The smallest agent needs only an HTTP client for the live model path.
-    # The loop, the fake model, and the tests run with nothing but the stdlib.
+    # The raw loop needs only an HTTP client for the live model path.
     "requests>=2",
+    # This step adds the same loop on a framework.
+    "langgraph>=0.2",
 ]
 
 [project.optional-dependencies]
