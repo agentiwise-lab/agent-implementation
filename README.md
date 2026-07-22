@@ -20,6 +20,10 @@ pytest                                                 # the tests for this step
 Both engines are driven by the same scripted model and the same tools, and give
 the same answer.
 
+## Example tickets
+
+The agent is tested on order-status questions its one tool can resolve: `is order 88213 delivered?` (delivered), `status of order 88320?` (processing), and `order 99999?` (unknown). The live smoke sends the first to a real model through the raw loop; `run_agent.py --level v1 --engine graph` runs the same query through the LangGraph engine. Anything beyond the one tool, such as an account or a runbook question, it can only guess at.
+
 ## What's implemented here
 
 Everything from the raw loop (the loop, one tool, the model boundary, the step
