@@ -1,83 +1,63 @@
-# agent-implementation — 03_01_tools: tools as governed contracts
+# agent-implementation — 03_02_mcp: expose the tools over one governed endpoint
 
-The agent gets hands, and hands are where an agent gets dangerous. This branch is
-the code for M6 V3, tool architecture. The point is not "the agent gets tools" (it
-had one in V1). It is that naive tool-adding breaks the agent in two new ways, and
-each break is fixed in the right layer: a read tool is a validated contract, a
-write tool is made idempotent in code, and what a caller may run is decided in
-code, never by the model. The lecture teaches the story; this README is the code
-reference.
+The tools work, but they are locked inside this process. This branch is the code
+for the MCP half of M6 V3. The point, led from the expose side: a product ships an
+MCP server so any agent (a customer's, or Claude and ChatGPT directly) reaches its
+systems through one governed endpoint, with the credential held server-side and
+never handed to the model. Then the consume side wraps a remote MCP tool into the
+agent's own registry, unchanged. The lecture teaches the story; this README is the
+code reference.
 
 ## Run it
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e . && export PYTHONPATH=.
-python -m evals.run_eval --level v3 --mode recorded   # G-04 now PASS: four of five
-python scripts/run_agent.py --level v3                 # idempotency + the authz boundary, offline
-pytest                                                 # the tests for this step
+pytest tests/test_mcp.py            # round trip + credential isolation, offline
+python -m evals.run_eval --level v3 --mode recorded   # the tools still gate at 4/5
 ```
 
-## What the eval reports (reproducible)
+## What the round trip shows (reproducible)
 
 ```
-level=v3 mode=recorded
-  G-01: PASS   G-02: PASS   G-03: PASS   G-04: PASS
-  G-05: FAIL first-miss=search_knowledge_base  (baseline, not gated)
-reachable success: 4/4   human-intervention rate: 0%   cost/success: 76 tokens
-GATE: PASS
+tools/list -> ['get_incident_status']
+tools/call -> degraded: bulk CSV export is rate-limited for accounts over the row limit
+server secret in response? False
 ```
 
-Four of five now. `get_account` closes the G-04 gap the eval named in V2. G-05 still
-needs a runbook search that does not exist yet, so it remains the baseline.
+The client names a tool and gets a result. The server used its internal credential
+to reach the "status system" server-side; that secret never crossed the wire. That
+is the security shape MCP gives you.
 
-## The two new breaks, and where each is fixed
+## What's implemented here
 
-```
-$ python scripts/run_agent.py --level v3
-issue_credit x2 with the same key (a retry):
-  1: issued credit of $50.00 to ACME [key ticket-4417-refund]
-  2: already issued: credit of $50.00 to ACME [key ticket-4417-refund]
-  journal.count() == 1   # one credit, not two
-customer asks the agent to issue itself $5000:
-   denied: customer may not call issue_credit
-  journal.count() == 1   # still one; the payout never happened
-```
-
-- **Break 1, the write double-charges on a retry.** Idempotency lives in code: each
-  credit carries an idempotency key, and the journal replays the first outcome on
-  any repeat. A JSON schema cannot enforce this; the tool implementation must.
-- **Break 2, the model is talked into a payout.** The control boundary: `issue_credit`
-  is internal-only in code, so even a fully fooled model calling it is denied by
-  `enforce_authz` before the function runs. The model proposes; the runtime disposes.
+A small, faithful slice of the Model Context Protocol: JSON-RPC 2.0 over a single
+HTTP endpoint (the Streamable HTTP transport shape that replaced HTTP+SSE). Of the
+three primitives (tools, resources, prompts), the tools primitive is implemented
+end to end, both directions: a server that exposes a tool and holds its credential,
+and a client that lists, calls, and adapts remote tools into the local registry.
 
 ## Components
 
 | File · lines | What it is | Why it exists |
 | --- | --- | --- |
-| `supportagent/tools/account.py` L19-L37 · `get_account`, `account_tool` | a read tool as a validated contract | closes the G-04 gap the agent used to guess at |
-| `supportagent/tools/actions.py` L18-L33 · `CreditJournal.issue`, `count` | an idempotent write: same key issued once | a retry or restart must not double-charge |
-| `supportagent/tools/actions.py` L36-L53 · `make_issue_credit_tool` | the write tool, requiring an idempotency key | the schema forces the caller to supply the key |
-| `supportagent/security/authz.py` L24-L33 · `AuthzPolicy`, `can_call` | which caller may run which tool, in code | authz is a code decision, never the model's |
-| `supportagent/security/authz.py` L35-L47 · `enforce_authz` | wraps a tool so the policy runs before the function | a denied call never reaches the side effect |
-| `supportagent/tools/__init__.py` L44-L67 · `ToolRegistry` | holds the tools, returns an error as an observation | a bad tool name is a recoverable observation, not a crash |
-| `evals/run_eval.py` L43-L52 · `tools_for_level` | registers `get_account` + `issue_credit` at v3 | capabilities compose, level by level |
+| `supportagent/mcp/server.py` L17-L41 · `_INTERNAL_TOKEN`, `_call_tool` | the exposed tool + the credential the server holds | the secret is used server-side and never returned |
+| `supportagent/mcp/server.py` L43-L72 · `_handle`, `MCPServer` | JSON-RPC over one POST endpoint (initialize / tools/list / tools/call) | the Streamable HTTP transport shape |
+| `supportagent/mcp/client.py` L41-L56 · `call_tool`, `to_tools` | calls a remote tool and wraps it as a local `Tool` | MCP tools flow through the same registry as our own |
 
-## The three layers of control (the architectural beat)
+## Expose first, then consume (the decision)
 
-The same rule can live in three places, and only one of them holds against a
-prompt-injected ticket:
-
-- **schema** = the input contract the model must satisfy (types, required fields);
-- **system prompt** = a soft hint the model can ignore;
-- **code** = what is allowed and what happens, the only layer injection cannot override.
-
-Idempotency and authorization live in code for that reason. Tenant isolation on the
-`Principal.tenant` field is carried here but enforced with the rest of the security
-work; the boundary shown here is the role check.
+- **Expose** is the side a product owns: ship one server, hold the credentials
+  there, and any agent reaches your systems through it without ever seeing a
+  secret. Prefer first-party servers (for example `mcp.stripe.com`) over a generic
+  wrapper someone else runs.
+- **Consume** is the client side: your agent treats a remote MCP tool exactly like
+  a local function. The transport (Streamable HTTP) and the protocol are the
+  interface; the language, database, and infra behind the server are invisible.
+- **MCP does not enforce idempotency or authorization.** Those still live in the
+  tool's own code (the previous step). MCP standardizes the wire, not the safety.
+- MCP is model-to-tool; A2A is agent-to-agent. They are complementary, not rivals.
 
 ## Not here yet
 
-- **MCP** (`03_02_mcp`): expose these tools over one governed endpoint so any agent
-  reaches them through a server that holds the credentials.
-- Everything from V4 on (retrieval, memory, context, orchestration, ops).
+- Retrieval, memory, context, orchestration, security-at-scale, and ops, from V4 on.
