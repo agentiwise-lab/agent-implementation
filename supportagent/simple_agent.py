@@ -3,21 +3,20 @@
 This is the V1 artifact, the whole idea on one screen. Take a single model call
 and wrap it in a loop: the model either names an action to run or gives a final
 answer; if it names an action, run it, append the result, and call the model
-again, until it answers or a ceiling stops it.
+again, until it answers or the step ceiling stops it.
 
 It reuses the shared contracts rather than reinventing them, so it is real and not
-a toy: the model boundary (`LLMClient`), the tools (`ToolRegistry`), and the two
-controls (`Caps`, `LoopDetector`) are the same ones the rest of the package uses.
-The production loop in `loop.py` is this exact skeleton grown with tracing, memory,
-durability, and cost hooks; here those are deliberately absent so the mechanism is
-visible with nothing hidden.
+a toy: the model boundary (`LLMClient`), the tools (`ToolRegistry`), and the step
+ceiling (`Caps`) are the same ones the rest of the package uses. There is no loop
+detection here yet: a model that never says "done" would run to the ceiling. That
+gap is what the next control adds.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .caps import Caps, LoopDetector
+from .caps import Caps
 from .llm import LLMClient, Message
 from .tools import ToolRegistry
 
@@ -26,7 +25,7 @@ from .tools import ToolRegistry
 class SimpleResult:
     answer: str
     steps: int
-    stop_reason: str  # "final" | "max_steps" | "loop_detected"
+    stop_reason: str  # "final" | "max_steps"
     transcript: list[Message] = field(default_factory=list)
 
 
@@ -37,9 +36,8 @@ def run_simple_agent(
     caps: Caps | None = None,
     system: str = "You are a support engineer. Resolve the ticket.",
 ) -> SimpleResult:
-    """Run one ticket to a final answer or a ceiling. The whole agent, raw."""
+    """Run one ticket to a final answer or the step ceiling. The whole agent, raw."""
     caps = caps or Caps()
-    detector = LoopDetector(caps.loop_repeat_threshold)
     transcript = [Message("system", system), Message("user", user_message)]
 
     for step in range(1, caps.max_steps + 1):
@@ -52,9 +50,6 @@ def run_simple_agent(
         call_id = f"call_{step}"
         transcript.append(Message("assistant", f"call {call.name}",
                                   tool_name=call.name, tool_args=call.args, tool_call_id=call_id))
-        if detector.record(call):                                    # same action, over and over: stuck
-            return SimpleResult(f"stopped: repeated {call.name}", step, "loop_detected", transcript)
-
         observation = tools.run(call.name, call.args)                # run what it asked for
         transcript.append(Message("tool", observation,               # feed the result back, loop again
                                   tool_name=call.name, tool_call_id=call_id))

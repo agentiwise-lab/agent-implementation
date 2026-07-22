@@ -13,8 +13,6 @@ a structured intent and stop, and the caller runs the tool and continues.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -73,9 +71,6 @@ class FakeLLMClient:
     You hand it a list of turns; it returns them in order. A turn is either a
     ``ToolCall`` (ask to run a tool) or a string (final answer). This is enough
     to drive the loop deterministically: request a tool, read the result, answer.
-
-    It scores nothing. Anything that needs a real model's judgement uses recorded
-    runs instead (added with the eval harness).
     """
 
     def __init__(self, script: list):
@@ -93,62 +88,3 @@ class FakeLLMClient:
         if isinstance(turn, ToolCall):
             return LLMResponse(tool_call=turn)
         return LLMResponse(final_text=str(turn))
-
-
-def transcript_key(messages: list[Message], tools: list[dict]) -> str:
-    """A stable fingerprint of the model's input, used to replay a recorded turn.
-
-    Two identical inputs produce the same key, so a committed recording of a real
-    model can be replayed offline and deterministically.
-    """
-    payload = [
-        {"role": m.role, "content": m.content, "tool": m.tool_name, "args": m.tool_args}
-        for m in messages
-    ]
-    payload.append({"tools": sorted(t["function"]["name"] for t in tools)})
-    blob = json.dumps(payload, sort_keys=True, default=str)
-    return hashlib.sha256(blob.encode()).hexdigest()[:16]
-
-
-class RecordedLLMClient:
-    """Replays a committed recording of a real model, keyed by input fingerprint.
-
-    This is what scores things offline: a real model answered every golden case
-    once, the turns were saved, and this replays them with no key. If an input is
-    not in the recording it raises, so a stale recording fails loudly rather than
-    scoring silently wrong.
-    """
-
-    def __init__(self, recording: dict):
-        self._rec = recording
-        self.calls = 0
-
-    def complete(self, messages: list[Message], tools: list[dict]) -> LLMResponse:
-        self.calls += 1
-        key = transcript_key(messages, tools)
-        if key not in self._rec:
-            raise KeyError(f"no recorded turn for input {key}; recording is stale")
-        turn = self._rec[key]
-        if turn.get("tool_call"):
-            tc = turn["tool_call"]
-            return LLMResponse(tool_call=ToolCall(name=tc["name"], args=tc["args"]))
-        return LLMResponse(final_text=turn.get("final_text", ""))
-
-
-class RecordingClient:
-    """Wraps a live client and captures every turn to build a recording."""
-
-    def __init__(self, inner: LLMClient):
-        self._inner = inner
-        self.recording: dict = {}
-        self.calls = 0
-
-    def complete(self, messages: list[Message], tools: list[dict]) -> LLMResponse:
-        self.calls += 1
-        response = self._inner.complete(messages, tools)
-        key = transcript_key(messages, tools)
-        if response.tool_call:
-            self.recording[key] = {"tool_call": {"name": response.tool_call.name, "args": response.tool_call.args}}
-        else:
-            self.recording[key] = {"final_text": response.final_text}
-        return response

@@ -1,8 +1,7 @@
-"""Run the agent at a chosen capability level.
+"""Run the smallest agent, the raw loop with one tool.
 
-At V1 the level is the bare loop with one stub tool and a scripted fake model, so
-it runs offline with no key. Later levels wire in the real model, tools, MCP,
-retrieval, memory, and the rest; the flag selects how far up the ladder to go.
+Offline by default: a scripted fake model drives the loop with no key, so the
+mechanism is visible end to end.
 
     python scripts/run_agent.py --level v1
 """
@@ -25,31 +24,14 @@ def _script():
         "Customer says order 88213 never arrived and their export is empty."
 
 
-def _demo_raw() -> None:
-    # V1 runs the smallest agent, the raw loop with nothing hidden behind it.
-    client, tools, question = _script()
-    result = run_simple_agent(client, tools, question, caps=Caps())
-    print(f"engine: raw  stop_reason: {result.stop_reason}  steps: {result.steps}")
-    print(f"answer: {result.answer}")
-
-
-def _demo_graph() -> None:
-    # The same agent on the real LangGraph StateGraph, driven by the same fake.
-    from supportagent.graph import run_graph_agent
-    client, tools, question = _script()
-    final = run_graph_agent(client, tools, question)
-    print(f"engine: graph  stop_reason: {final['stop_reason']}  steps: {final['steps']}")
-    print(f"answer: {final['answer']}")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--level", default="v1", choices=["v1"])
-    parser.add_argument("--engine", default="raw", choices=["raw", "graph"],
-                        help="raw = the native-Python loop; graph = the same agent on LangGraph")
-    args = parser.parse_args()
-    if args.level == "v1":
-        _demo_graph() if args.engine == "graph" else _demo_raw()
+    parser.parse_args()
+    client, tools, question = _script()
+    result = run_simple_agent(client, tools, question, caps=Caps())
+    print(f"stop_reason: {result.stop_reason}  steps: {result.steps}")
+    print(f"answer: {result.answer}")
 
 
 if __name__ == "__main__":
