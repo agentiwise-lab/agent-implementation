@@ -48,6 +48,10 @@ def tools_for_level(level: str) -> ToolRegistry:
         # whose idempotency is enforced in code.
         reg.register(account_tool)
         reg.register(make_issue_credit_tool(CreditJournal()))
+    if _LEVELS.index(level) >= _LEVELS.index("v4"):
+        # Retrieval the agent decides to call: the runbook search that closes G-05.
+        from supportagent.retrieval import make_search_tool
+        reg.register(make_search_tool())
     return reg
 
 

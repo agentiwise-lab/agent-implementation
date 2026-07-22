@@ -80,13 +80,39 @@ def _tools() -> None:
     print(f"  journal.count() == {journal.count()}   # still one; the payout never happened")
 
 
+def _rag() -> None:
+    # Agentic retrieval, shown offline: the agent searches, judges a thin result,
+    # and reformulates. A scripted model drives the corrective loop so the
+    # mechanism is visible with no key.
+    from supportagent.retrieval import make_search_tool
+
+    tools = ToolRegistry([make_search_tool()])
+    # First query is vague and returns the no-match signal; the agent reformulates
+    # and the second query finds the runbook.
+    client = FakeLLMClient([
+        ToolCall("search_knowledge_base", {"query": "the weather in Tokyo tomorrow afternoon"}),
+        ToolCall("search_knowledge_base", {"query": "empty CSV export large account row limit"}),
+        "Large CSV exports come back empty because the export hits the plan row limit "
+        "(10,000 rows on starter). Tell the customer to filter the export or upgrade the plan.",
+    ])
+    result = run_agent(client, tools, "Why do large CSV exports come back empty, and what do we tell them?")
+    print("corrective search (a thin result becomes a signal to reformulate):")
+    for m in result.transcript:
+        if m.role == "tool":
+            first = m.content.splitlines()[0]
+            print(f"  search -> {first}")
+    print(f"\nanswer: {result.answer}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--level", default="v1", choices=["v1", "v2", "v3"])
+    parser.add_argument("--level", default="v1", choices=["v1", "v2", "v3", "v4"])
     parser.add_argument("--engine", default="raw", choices=["raw", "graph"],
                         help="raw = the native-Python loop; graph = the same agent on LangGraph")
     args = parser.parse_args()
-    if args.level == "v3":
+    if args.level == "v4":
+        _rag()
+    elif args.level == "v3":
         _tools()
     elif args.level == "v2":
         _instrumented()
