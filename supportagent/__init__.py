@@ -1,16 +1,17 @@
 """supportagent: one agent, grown across the FDE M6 videos.
 
-This branch (01_01_loop) is the smallest agent: the raw loop with one tool.
-Import from here, not from internals.
+This branch (01_02_caps) is the smallest agent with its controls: the raw loop,
+a step ceiling, and loop detection. Import from here, not from internals.
 """
 
-from .caps import Caps
+from .caps import Caps, LoopDetector
 from .llm import FakeLLMClient, LLMClient, LLMResponse, Message, ToolCall
 from .simple_agent import SimpleResult, run_simple_agent
 from .tools import Tool, ToolRegistry
 
 __all__ = [
     "Caps",
+    "LoopDetector",
     "FakeLLMClient",
     "LLMClient",
     "LLMResponse",
