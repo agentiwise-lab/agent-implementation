@@ -17,6 +17,10 @@ pytest                                     # the tests for this step
 `run_agent.py --level v1` prints the loop resolving one ticket: it calls
 `get_order_status`, reads the result, and answers.
 
+## Example tickets
+
+The agent is tested on order-status questions its one tool can resolve: `is order 88213 delivered?` (delivered), `status of order 88320?` (processing), and `order 99999?` (unknown). The live smoke sends the first to a real model. Anything beyond the one tool, such as an account or a runbook question, it can only guess at.
+
 ## What's implemented here
 
 The loop, one canned tool, the model boundary, and a step ceiling. There is **no
