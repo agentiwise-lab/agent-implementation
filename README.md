@@ -14,6 +14,10 @@ python scripts/live_smoke.py --level v1    # against a real model (needs OPENROU
 pytest                                     # the tests for this step
 ```
 
+## Example tickets
+
+The agent is tested on order-status questions its one tool can resolve: `is order 88213 delivered?` (delivered), `status of order 88320?` (processing), and `order 99999?` (unknown). The live smoke sends the first to a real model. Anything beyond the one tool, such as an account or a runbook question, it can only guess at.
+
 ## What's implemented here
 
 The loop, one canned tool, the model boundary, a step ceiling, and now **loop
