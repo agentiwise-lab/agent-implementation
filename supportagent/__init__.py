@@ -16,7 +16,7 @@ from .llm import (
     ToolCall,
     transcript_key,
 )
-from .loop import AgentResult, run_agent
+from .graph import AgentResult, build_agent_graph, run_graph_agent
 from .simple_agent import SimpleResult, run_simple_agent
 from .telemetry import Span, Trace, Tracer
 from .tools import Tool, ToolRegistry
@@ -33,7 +33,8 @@ __all__ = [
     "ToolCall",
     "transcript_key",
     "AgentResult",
-    "run_agent",
+    "run_graph_agent",
+    "build_agent_graph",
     "SimpleResult",
     "run_simple_agent",
     "Span",
