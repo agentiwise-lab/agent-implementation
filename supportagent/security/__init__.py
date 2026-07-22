@@ -1,13 +1,24 @@
-"""The authorization boundary.
+"""Securing the agent: guards, egress, and the authorization boundary.
 
-The agent can now act: it can issue a credit. Whether a given caller may run a
-given tool is decided in code, from the caller's identity, never by the model.
-The model's job is to decide what to attempt; the code's job is to decide what is
-allowed. Even a fully fooled model cannot run a tool its caller is not authorized
-to run. Injection detection and output filtering are added when the agent starts
-reading untrusted content at scale; here the boundary is the whole story.
+The deep-research agent holds keys and customer data (private data), reads
+untrusted web content (search results, fetched pages), and fetches arbitrary URLs
+and emits cited links (it can exfiltrate). Those three together are the lethal
+trifecta. Three layers answer it:
+
+- guards flag likely injection in untrusted content and strip exfil links from a
+  report, but detection is best-effort and never the guarantee;
+- the egress guard resolves and refuses internal addresses before a fetch, closing
+  the server-side exfiltration path;
+- the authorization boundary is the guarantee: whether a tool may run, and on
+  whose data, is decided in code, never by the model.
 """
 
 from .authz import AuthzPolicy, Principal, enforce_authz
+from .egress import is_blocked_host, make_guarded_fetch
+from .guards import detect_injection, output_guard, strip_exfil_links
 
-__all__ = ["AuthzPolicy", "Principal", "enforce_authz"]
+__all__ = [
+    "AuthzPolicy", "Principal", "enforce_authz",
+    "is_blocked_host", "make_guarded_fetch",
+    "detect_injection", "output_guard", "strip_exfil_links",
+]

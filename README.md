@@ -1,70 +1,64 @@
-# agent-implementation — 08_02_research_workflow: the codified deep-research workflow
+# agent-implementation — 09_01_guards: the lethal trifecta, and the defenses that hold
 
-The second half of M6 V8: the ad-hoc subagent becomes a codified workflow. This is
-the workflow-versus-agent distinction made concrete in code. The shell is a fixed
-LangGraph graph, decompose then fan out then synthesize; the one step you cannot
-enumerate, researching a sub-question, is an agentic node run in isolation. The
-lecture teaches the story; this README is the code reference.
+The research agent holds keys and customer data, reads untrusted web content, and
+fetches arbitrary URLs and emits cited links. That is the complete lethal trifecta
+(Simon Willison): private data + untrusted content + a way to exfiltrate. This
+branch is the guard half of M6 V9. The spine, stated up front: detection is
+best-effort; the boundary is the guarantee. The lecture teaches the story; this
+README is the code reference.
 
-> Status: code complete and offline-green. The research tools are canned so the
-> workflow runs deterministically with no key; the whole chain prints from the
-> ResearchRun. Live web + a live model are a sprint-time swap behind the same
-> contracts.
+> Status: code complete and offline-green. Every attack and defense below runs with
+> no key; the SSRF resolver is injectable so the check is deterministic in tests.
 
 ## Run it
 
 ```bash
 pip install -e . && export PYTHONPATH=.
-python scripts/research_demo.py        # the ad-hoc subagent AND the workflow's visible chain
-pytest tests/test_workflow.py          # fan-out, fan-in, synthesis, the router, asserted
+python scripts/security_demo.py        # the trifecta attacked and defended
+pytest tests/test_security.py          # SSRF, injection, exfil-stripping, asserted
 ```
 
-## What the workflow returns (reproducible, offline)
+## What the defenses do (reproducible, offline)
 
 ```
-[1] trigger: human  query: map the competitive landscape for meeting AI
-[2] planner decomposed into 4 aspects: market size / key players / differentiators / risks
-[3] 4 research workers returned (isolated): one distilled finding per aspect, with a source
-[4] synthesis incorporated each finding into one cited report
+1) detect_injection(page) = True            # a hidden instruction is flagged (best-effort)
+2) refused: SSRF egress guard blocked host 169.254.169.254 (internal address)
+3) exfil image link to evil.com stripped from the report
 ```
 
-Nothing is hidden: the trigger, the decomposed aspects, each worker's returned
-finding, and the one-shot synthesis are all visible in the `ResearchRun`.
+## What's implemented here
 
-## The graph
-
-```
-planner  --Send fan-out-->  worker (xN, parallel, isolated)  -->  synthesis
-```
-
-The planner decomposes the query into independent aspects; the LangGraph **Send
-API** dispatches one worker per aspect; each worker runs a research subagent in its
-own context and returns a compressed finding; a reducer fans the findings back in;
-a single synthesis node writes one cited report (never in parallel, which would
-give a disjoint report).
+- **SSRF egress guard (the centerpiece).** `is_blocked_host` resolves a URL's host
+  to an IP and refuses any loopback, private, link-local, or reserved address,
+  before the fetch. Resolving and classifying the IP (not string-matching the host)
+  is what defeats the decimal/hex/IPv6-mapped encodings and public-name-to-internal
+  tricks: they all reduce to the same forbidden IP once resolved.
+- **Injection detection.** `detect_injection` flags override-style content in a
+  fetched page. Honest ceiling: it evades on encoded input and paraphrase, and an
+  input-only guard cannot catch indirect injection in retrieved content. Best-effort.
+- **Output-side exfil stripping (EchoLeak class).** `strip_exfil_links` removes
+  inline and reference-style links and images to non-allowlisted domains from a
+  report, before it ships. A research agent that emits citations IS this surface.
 
 ## Components
 
 | File · lines | What it is | Why it exists |
 | --- | --- | --- |
-| `supportagent/research/workflow.py` L92-L134 · `build_research_workflow` | the LangGraph graph: planner, Send fan-out, worker, one-shot synthesis | the codified workflow shell |
-| `supportagent/research/workflow.py` L107-L109 · `fan_out` (Send) | one parallel isolated worker per aspect | dynamic fan-out, the Send API |
-| `supportagent/research/workflow.py` L64-L88 · `ResearchRun`, `pretty` | the whole chain, printable | trigger, aspects, findings, report, all visible |
-| `supportagent/research/workflow.py` L45-L61 · `classify_research` | the model-side router (heuristic stand-in) | the second of two triggers |
-| `supportagent/research/workflow.py` L155-L161 · `start_research` | the dual trigger: human-explicit or router | same workflow, recorded trigger differs |
-| `supportagent/research/subagent.py` · `make_research_subagent` | the isolated worker each node runs | isolation is why the team beats one agent |
+| `supportagent/security/egress.py` L34-L62 · `is_blocked_host` | resolve + classify the IP, refuse internal addresses | SSRF on a URL-fetching agent, resolved not string-matched |
+| `supportagent/security/egress.py` L65-L80 · `make_guarded_fetch` | wraps fetch so the guard runs first | a blocked URL is an observation, never a fetched resource |
+| `supportagent/security/guards.py` · `detect_injection` | flags override-style content | best-effort, never the guarantee |
+| `supportagent/security/guards.py` · `strip_exfil_links` | strips exfil links/images to non-allowlisted domains | the EchoLeak-class output exfiltration surface |
 
 ## The decision this teaches
 
-- **Workflow versus agent, in code.** For research you always want decompose then
-  fan-out then synthesize; that is a predefined path, a workflow, not something to
-  re-decide each turn. The research inside each node is the agentic part. Codify the
-  shell, keep the node agentic.
-- **Write the report one-shot.** Synthesis is a single pass over all findings.
-  Writing sections in parallel gives a disjoint report; this is the lesson every
-  deep-research implementer learns the hard way.
+- **Detection is best-effort; the boundary is the guarantee.** Guards reduce risk;
+  the code-enforced egress guard, output guard, and authorization boundary are what
+  actually stop the action. Never rely on asking the model nicely.
+- **Which layer?** Injection detection is a heuristic; egress and authorization are
+  code that fails closed. Put the thing that stops an irreversible or exfiltrating
+  action in code, always.
 
 ## Not here yet
 
-- **Securing the research agent** (`09_*`): it holds keys, reads untrusted web
-  content, and can fetch and exfiltrate: the complete lethal trifecta.
+- **The authorization boundary + multi-tenant isolation** (`09_02_authz`): delivery
+  is code-gated, and one tenant's subagent cannot read another's data.
