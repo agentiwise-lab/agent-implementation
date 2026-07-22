@@ -27,6 +27,7 @@ from typing import Annotated, TypedDict
 from langgraph.graph import END, StateGraph
 
 from .caps import Caps, LoopDetector
+from .context.compaction import compact, prune_tool_results, stable_prefix
 from .llm import LLMClient, Message
 from .memory.store import Episode, LongTermStore
 from .telemetry import Tracer
@@ -96,19 +97,33 @@ def build_agent_graph(
     caps: Caps | None = None,
     tracer: Tracer | None = None,
     checkpointer=None,
+    context_budget_tokens: int | None = None,
 ):
     """Compile a real LangGraph agent over the given model and tools.
 
     A `LoopDetector` lives in this closure, so one detector spans a whole run: the
     same tool with the same arguments repeated to the threshold stops the run, the
     framework carrying the state the raw loop kept by hand.
+
+    Pass `context_budget_tokens` to curate the window before each model call: prune
+    bulky tool results, compact the middle of a long transcript under the budget,
+    and order the stable prefix first. The full transcript stays in the graph
+    state; only what the model sees each turn is curated.
     """
     caps = caps or Caps()
     detector = LoopDetector(caps.loop_repeat_threshold)
 
+    def _curate(messages: list) -> list:
+        if not context_budget_tokens:
+            return messages
+        window = prune_tool_results(messages)
+        window = compact(window, context_budget_tokens)
+        return stable_prefix(window)
+
     def agent_node(state: GraphState) -> dict:
-        prompt_tokens = sum(_estimate_tokens(m.content) for m in state["messages"])
-        response = client.complete(state["messages"], tools.schemas())
+        window = _curate(state["messages"])   # what the model sees this turn
+        prompt_tokens = sum(_estimate_tokens(m.content) for m in window)
+        response = client.complete(window, tools.schemas())
         step = state["steps"] + 1
         user_message = next((m.content for m in state["messages"] if m.role == "user"), "")
 
@@ -169,6 +184,7 @@ def run_graph_agent(
     thread_id: str = "default",
     store: LongTermStore | None = None,
     customer: str | None = None,
+    context_budget_tokens: int | None = None,
 ) -> AgentResult:
     """Run the LangGraph agent once and return the scored `AgentResult`.
 
@@ -183,7 +199,8 @@ def run_graph_agent(
     resolved episode at the close.
     """
     caps = caps or Caps()
-    app = build_agent_graph(client, tools, caps=caps, tracer=tracer, checkpointer=checkpointer)
+    app = build_agent_graph(client, tools, caps=caps, tracer=tracer, checkpointer=checkpointer,
+                            context_budget_tokens=context_budget_tokens)
 
     system_content = system
     if store and customer:

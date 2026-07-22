@@ -9,6 +9,7 @@ Offline by default: a scripted fake model drives the agent with no key.
     python scripts/run_agent.py --level v3               # idempotency + the authz boundary
     python scripts/run_agent.py --level v4               # the corrective-search loop
     python scripts/run_agent.py --level v5               # long-term memory: recall across tickets
+    python scripts/run_agent.py --level v6               # curate the window under a budget
 """
 
 from __future__ import annotations
@@ -116,13 +117,44 @@ def _memory() -> None:
         print(f"  {line}")
 
 
+def _context() -> None:
+    # Context engineering, shown offline: the same run with and without a window
+    # budget. Bulky tool results build a long transcript; the budgeted run curates
+    # what the model sees each turn.
+    from supportagent import Tool, estimate_tokens, recite
+
+    bulky = Tool(name="lookup", description="a verbose lookup",
+                 fn=lambda **k: "DETAIL " * 80,
+                 parameters={"type": "object", "properties": {"q": {"type": "string"}}})
+    script = [ToolCall("lookup", {"q": str(i)}) for i in range(6)] + ["Done."]
+
+    def biggest_window(budget):
+        seen = []
+
+        class _Capture(FakeLLMClient):
+            def complete(self, messages, tools):
+                seen.append(sum(estimate_tokens(m.content) for m in messages))
+                return super().complete(messages, tools)
+
+        run_graph_agent(_Capture(list(script)), ToolRegistry([bulky]), "resolve this",
+                        caps=Caps(max_steps=14), context_budget_tokens=budget)
+        return max(seen)
+
+    print(f"biggest window, no budget:   {biggest_window(None)} tokens")
+    print(f"biggest window, budget=60:   {biggest_window(60)} tokens   # pruned + compacted")
+    print("\nrecitation keeps the goal in recent attention:")
+    print("  " + recite("resolve the export ticket", ["check row limit", "reply to customer"]).replace("\n", "\n  "))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--level", default="v1", choices=["v1", "v2", "v3", "v4", "v5"])
+    parser.add_argument("--level", default="v1", choices=["v1", "v2", "v3", "v4", "v5", "v6"])
     parser.add_argument("--engine", default="raw", choices=["raw", "graph"],
                         help="raw = the native-Python loop (V1 artifact); graph = the LangGraph agent")
     args = parser.parse_args()
-    if args.level == "v5":
+    if args.level == "v6":
+        _context()
+    elif args.level == "v5":
         _memory()
     elif args.level == "v4":
         _rag()

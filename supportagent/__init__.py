@@ -16,6 +16,7 @@ from .llm import (
     ToolCall,
     transcript_key,
 )
+from .context import Scratchpad, compact, estimate_tokens, prune_tool_results, recite, stable_prefix
 from .graph import AgentResult, build_agent_graph, run_graph_agent
 from .memory import Episode, LongTermStore
 from .simple_agent import SimpleResult, run_simple_agent
@@ -38,6 +39,12 @@ __all__ = [
     "build_agent_graph",
     "Episode",
     "LongTermStore",
+    "compact",
+    "prune_tool_results",
+    "stable_prefix",
+    "estimate_tokens",
+    "Scratchpad",
+    "recite",
     "SimpleResult",
     "run_simple_agent",
     "Span",
