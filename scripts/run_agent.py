@@ -1,17 +1,19 @@
-"""Run the smallest agent, raw or on LangGraph.
+"""Run the agent offline: the raw loop, the same loop on LangGraph, or the
+instrumented loop that the eval scores.
 
 Offline by default: a scripted fake model drives the loop with no key. The same
-scripted model, the same tools, drive either engine unchanged.
+scripted model, the same tools, drive every engine unchanged.
 
     python scripts/run_agent.py --level v1                 # the raw loop
     python scripts/run_agent.py --level v1 --engine graph  # the same loop on LangGraph
+    python scripts/run_agent.py --level v2                 # the instrumented loop + a trace
 """
 
 from __future__ import annotations
 
 import argparse
 
-from supportagent import Caps, FakeLLMClient, ToolCall, ToolRegistry, run_simple_agent
+from supportagent import Caps, FakeLLMClient, ToolCall, ToolRegistry, Tracer, run_agent, run_simple_agent
 from supportagent.tools.order_status import order_status_tool
 
 
@@ -39,13 +41,31 @@ def _graph() -> None:
     print(f"answer: {final['answer']}")
 
 
+def _instrumented() -> None:
+    # The loop the eval scores: a structured result and a trace of every call.
+    client, tools, question = _script()
+    tracer = Tracer(name="run-agent")
+    result = run_agent(client, tools, question, caps=Caps(), tracer=tracer)
+    print(f"engine: loop  stop_reason: {result.stop_reason}  steps: {result.steps}  tokens: {result.tokens}")
+    print(f"needed_human: {result.needed_human}")
+    print(f"answer: {result.answer}")
+    print("trace:")
+    for span in result.tracer.trace.spans:
+        print(f"  [{span.kind}] {span.name}: {span.output[:70]}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--level", default="v1", choices=["v1"])
+    parser.add_argument("--level", default="v1", choices=["v1", "v2"])
     parser.add_argument("--engine", default="raw", choices=["raw", "graph"],
                         help="raw = the native-Python loop; graph = the same agent on LangGraph")
     args = parser.parse_args()
-    _graph() if args.engine == "graph" else _raw()
+    if args.level == "v2":
+        _instrumented()
+    elif args.engine == "graph":
+        _graph()
+    else:
+        _raw()
 
 
 if __name__ == "__main__":

@@ -1,48 +1,76 @@
-# agent-implementation — 01_03_langgraph: the same loop, on a framework
+# agent-implementation — 02_01_eval: evaluating the agent
 
-The raw loop from the previous steps, now also built on LangGraph. This branch is
-the code for the third step of M6 V1. The point: all the plumbing you wrote by hand
-(the step ceiling, and later durable state) is what a framework built for agents
-gives you as arguments, so the same loop moves onto LangGraph unchanged. The lecture
-teaches the story; this README is the code reference.
+The V1 agent, now instrumented and measured. This branch is the code for M6 V2,
+eval-driven development. The point: a happy-path demo hides failures, so the loop
+grows a structured result and a trace, and a golden set with a multi-metric gate
+turns "it looks fine" into a number and a named first-failure. The lecture teaches
+the story; this README is the code reference.
 
 ## Run it
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e . && export PYTHONPATH=.
-python scripts/run_agent.py --level v1                 # the raw loop
-python scripts/run_agent.py --level v1 --engine graph  # the same loop on LangGraph
-python scripts/live_smoke.py --level v1                # the raw loop against a real model
+python -m evals.run_eval --level v2 --mode recorded   # replay the committed run, offline
+python scripts/run_agent.py --level v2                 # the instrumented loop + a printed trace
+python scripts/live_smoke.py --level v2                # a real run, trace exported to Langfuse
 pytest                                                 # the tests for this step
 ```
 
-Both engines are driven by the same scripted model and the same tools, and give
-the same answer.
+`--mode recorded` replays a committed recording of a real model with no key, so
+the gate is reproducible in CI. `--mode record` runs live once and saves the run;
+`--mode live` runs live without saving.
 
-## Example tickets
+## What the eval reports (reproducible)
 
-The agent is tested on order-status questions its one tool can resolve: `is order 88213 delivered?` (delivered), `status of order 88320?` (processing), and `order 99999?` (unknown). The live smoke sends the first to a real model through the raw loop; `run_agent.py --level v1 --engine graph` runs the same query through the LangGraph engine. Anything beyond the one tool, such as an account or a runbook question, it can only guess at.
+```
+level=v2 mode=recorded
+  G-01: PASS   G-02: PASS   G-03: PASS
+  G-04: FAIL first-miss=get_account            (baseline, not gated)
+  G-05: FAIL first-miss=search_knowledge_base  (baseline, not gated)
+reachable success: 3/3   human-intervention rate: 0%   cost/success: 69 tokens
+GATE: PASS
+```
+
+Three of five resolve. The two failures are not noise: the eval names the first
+tool each run needed and did not have (`get_account`, then `search_knowledge_base`),
+which is the prioritized gap later capabilities close. Those two are baselines,
+reported but not gated.
 
 ## What's implemented here
 
-Everything from the raw loop (the loop, one tool, the model boundary, the step
-ceiling, and loop detection), plus a real **LangGraph** StateGraph that runs the
-same agent. No retrieval, memory, tracing, or eval yet.
+The V1 loop, promoted to an instrumented `run_agent` that returns an `AgentResult`
+(transcript, tokens, a `needed_human` signal) and records a real OpenTelemetry
+trace per model and tool call, exported to a self-hosted Langfuse. Plus the eval
+harness: a golden set, trajectory + answer scoring, an LLM-as-judge for the cases
+a substring cannot grade, and a multi-metric gate. Evaluation also institutionalizes
+one fix: a trajectory rule fails any empty final, so a truncated "resolved" ticket
+can never score as a pass.
 
 ## Components
 
 | File · lines | What it is | Why it exists |
 | --- | --- | --- |
-| `supportagent/simple_agent.py` L31-L60 · `run_simple_agent` | the raw loop | the mechanism, in plain Python, nothing hidden |
-| `supportagent/graph.py` L66-L72 · the StateGraph wiring | an `agent` node, a `tools` node, and a conditional edge that loops between them or ends | the raw `while` loop, expressed as a framework graph |
-| `supportagent/graph.py` L75-L104 · `run_graph_agent` | runs the graph once; the raw loop's step ceiling becomes LangGraph's `recursion_limit`, and a checkpointer (passed in) would persist the run | the controls you hand-rolled become framework arguments |
-| `supportagent/caps.py` L21-L46 · `Caps`, `LoopDetector` | the hand-rolled controls | shown so the contrast with the framework is concrete |
-| `supportagent/llm.py` L55-L66 · `LLMClient` | the model boundary | the same contract drives both engines unchanged |
-| `supportagent/tools/__init__.py` L44-L67 · `ToolRegistry` | holds and runs the tools | the model names a tool; the registry runs it |
-| `supportagent/tools/order_status.py` L18-L33 · `order_status_tool` | the one canned tool | gives the loop something real to call |
+| `supportagent/loop.py` L54-L114 · `run_agent` | the V1 loop, instrumented: structured result + a span per call | you cannot score or see a run the raw loop threw away |
+| `supportagent/loop.py` L35-L52 · `AgentResult`, `needed_human` | the run as data: transcript, tokens, hand-off signal | the metrics read this, not the prose answer |
+| `supportagent/telemetry.py` L109-L138 · `Tracer` | one OpenTelemetry span per model/tool call, one trace per run | a run becomes a tree you open in Langfuse |
+| `supportagent/openrouter.py` L96-L102 · truncation guard | empty content at `finish_reason=="length"` becomes a visible notice | a silent empty final looked like a resolved ticket |
+| `evals/golden.py` L16-L72 · `GoldenCase`, `GOLDEN`, `reachable_at` | five cases mined from resolved tickets, each with the tools + answer it needs | the fixed set the gate scores against |
+| `evals/trajectory.py` L26-L82 · `tool_correctness`, `first_upstream_failure`, `answer_nonempty`, `score_case` | score the path, name the first missing tool, refuse an empty final | reading the path separates a retrieval bug from a generation bug |
+| `evals/judge.py` L16-L25 · `llm_judge` | a second model grades answers a substring cannot | for paraphrases and judgement calls, used sparingly |
+| `evals/run_eval.py` L60-L108 · `run`, the gate | runs the set, prints per-case + three metrics, gates on reachable cases | the multi-metric gate every later capability opens against |
+
+## Example tickets
+
+`is order 88213 delivered?` (PASS, delivered 2026-07-19), `status of order 88320?`
+(PASS, processing), `order 99999?` (PASS, unknown). `what plan is ACME on, does it
+allow bulk CSV export?` reaches for `get_account`, which does not exist yet, so it
+fails with `first-miss=get_account`. `why do large CSV exports come back empty?`
+needs a runbook search that does not exist yet, so it fails with
+`first-miss=search_knowledge_base`.
 
 ## Not here yet
 
-- **Eval + tracing** (`02_01_eval`): a golden set, traces in Langfuse, and a gate.
-- Everything from V3 on (real tools, retrieval, memory, orchestration, security, ops).
+- **Real tools** (`03_01_tools`): `get_account` closes the G-04 gap; an idempotent
+  `issue_credit` shows write-safety in code.
+- Everything from V4 on (retrieval, memory, context, orchestration, security, ops).

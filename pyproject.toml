@@ -6,8 +6,12 @@ requires-python = ">=3.10"
 dependencies = [
     # The raw loop needs only an HTTP client for the live model path.
     "requests>=2",
-    # This step adds the same loop on a framework.
+    # The same loop on a framework (V1 framework beat).
     "langgraph>=0.2",
+    # This step turns the run into a real OpenTelemetry trace and exports it to a
+    # self-hosted Langfuse over OTLP. The core loop and tests run without these.
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-exporter-otlp-proto-http>=1.20",
 ]
 
 [project.optional-dependencies]
