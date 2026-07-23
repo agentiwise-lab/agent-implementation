@@ -98,21 +98,40 @@ def _rag() -> None:
 
 
 def _memory() -> None:
-    # Long-term memory, shown offline: a first ticket is written, and the next
-    # ticket for the same customer opens already knowing it.
+    # Long-term memory, shown offline: two tickets write all three kinds, and the
+    # third ticket for the same customer opens already knowing what they wrote.
     from supportagent import LongTermStore
     from supportagent.graph import _recalled_context
+    from supportagent.tools.account import account_tool
 
     store = LongTermStore()
-    tools = ToolRegistry([order_status_tool])
+    tools = ToolRegistry([order_status_tool, account_tool])
+
+    # Ticket 1 resolves through a tool: an episode, plus the fact the tool returned.
     run_graph_agent(
-        FakeLLMClient(["ACME is on the enterprise plan and allows bulk CSV export."]),
+        FakeLLMClient([
+            ToolCall("get_account", {"customer": "ACME"}),
+            "ACME is on the enterprise plan and allows bulk CSV export.",
+        ]),
         tools, "What plan is ACME on?", store=store, customer="ACME",
     )
-    print("ticket 1 resolved and written to long-term memory:")
+    # Ticket 2 goes wrong in a repeatable way: the model reaches for a tool that
+    # does not exist, which is what the playbook is for.
+    run_graph_agent(
+        FakeLLMClient([
+            ToolCall("refund_order", {"order_id": "88213"}),
+            "I cannot issue a refund from here; handing this to billing.",
+        ]),
+        tools, "Refund order 88213 for ACME.", store=store, customer="ACME",
+    )
+
+    print("after two tickets, each kind of long-term memory holds something:")
+    print(f"  semantic  : {store.facts('ACME')}")
     for ep in store.recall("ACME"):
-        print(f"  episode: {ep.ticket} -> {ep.resolution}")
-    print("\nticket 2 for ACME opens with this recalled into its system message:")
+        print(f"  episodic  : {ep.ticket} -> {ep.resolution}")
+    for line in store.playbook().splitlines():
+        print(f"  procedural: {line}")
+    print("\nthe next ticket for ACME opens with all of it in its system message:")
     for line in _recalled_context(store, "ACME").splitlines():
         print(f"  {line}")
 
