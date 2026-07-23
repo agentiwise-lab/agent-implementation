@@ -2,7 +2,8 @@
 
 Behavior under test:
 - recalled long-term memory reaches the model's system message
-- a resolved ticket is written back as an episode
+- a resolved ticket is written back as an episode, a durable fact from a tool
+  result as semantic memory, and a repeatable mistake as a playbook lesson
 - facts persist across processes (a fresh store reads what a prior one wrote)
 - LangGraph's checkpointer holds working state, so a fresh graph instance on the
   same thread sees the persisted transcript (durability is the framework's, not
@@ -20,6 +21,7 @@ from supportagent import (
     build_agent_graph,
     run_graph_agent,
 )
+from supportagent.tools.account import account_tool
 from supportagent.tools.order_status import order_status_tool
 
 
@@ -83,3 +85,39 @@ def test_langgraph_checkpointer_holds_working_memory(tmp_path):
         state = app2.get_state(config)
     assert any(m.role == "tool" for m in state.values["messages"])
     assert "delivered" in state.values["answer"].lower()
+
+
+def test_a_durable_fact_from_a_tool_result_is_written_as_semantic_memory():
+    # get_account returned the plan. That is a fact about the customer, true next
+    # week too, so it belongs in semantic memory, not only in this transcript.
+    store = LongTermStore()
+    client = FakeLLMClient([
+        ToolCall("get_account", {"customer": "ACME"}),
+        "ACME is on the enterprise plan.",
+    ])
+    run_graph_agent(client, ToolRegistry([account_tool]),
+                    "What plan is ACME on?", store=store, customer="ACME")
+    assert store.facts("ACME")["plan"] == "enterprise"
+
+
+def test_a_run_that_reached_for_a_missing_tool_writes_a_lesson():
+    # The model asked for a tool the registry does not have. That is a repeatable
+    # mistake, so the playbook the agent reads at the next open records it.
+    store = LongTermStore()
+    client = FakeLLMClient([
+        ToolCall("refund_order", {"order_id": "88213"}),
+        "I cannot refund that here.",
+    ])
+    run_graph_agent(client, ToolRegistry([order_status_tool]),
+                    "Refund order 88213.", store=store, customer="ACME")
+    assert "refund_order" in store.playbook()
+
+
+def test_a_clean_run_leaves_the_playbook_alone():
+    # Procedural memory is written from failure, not from every run, or the
+    # playbook fills with noise and crowds the context it is recalled into.
+    store = LongTermStore()
+    client = FakeLLMClient(["ACME is on the enterprise plan."])
+    run_graph_agent(client, ToolRegistry([order_status_tool]),
+                    "What plan is ACME on?", store=store, customer="ACME")
+    assert store.playbook() == ""
