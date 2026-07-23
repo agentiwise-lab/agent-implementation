@@ -8,10 +8,11 @@ Two kinds, and they live in two different places on purpose:
   `compile()`, not a store you hand-roll.
 - Across sessions, the agent recalls long-term memory: semantic facts about an
   account, episodic records of past tickets, and a procedural playbook. That is
-  this module's `LongTermStore`, recalled at the open of a run and written on
-  resolution.
+  this module's `LongTermStore`, recalled at the open of a run and written back
+  at its close by `remember_run`, which fills all three.
 """
 
 from .store import Episode, LongTermStore
+from .write import remember_run
 
-__all__ = ["Episode", "LongTermStore"]
+__all__ = ["Episode", "LongTermStore", "remember_run"]
