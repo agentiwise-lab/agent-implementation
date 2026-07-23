@@ -28,7 +28,8 @@ from langgraph.graph import END, StateGraph
 
 from .caps import Caps, LoopDetector
 from .llm import LLMClient, Message
-from .memory.store import Episode, LongTermStore
+from .memory.store import LongTermStore
+from .memory.write import remember_run
 from .telemetry import Tracer
 from .tools import ToolRegistry
 
@@ -179,8 +180,8 @@ def run_graph_agent(
     Working memory and durable resume are LangGraph's own: pass a `checkpointer`
     (for example a `SqliteSaver`) and a `thread_id` and the framework persists the
     run each step and resumes the same thread. Pass a `store` and `customer` to
-    recall long-term memory into the system message at the open, and write the
-    resolved episode at the close.
+    recall long-term memory into the system message at the open, and write back
+    what the run learned at the close.
     """
     caps = caps or Caps()
     app = build_agent_graph(client, tools, caps=caps, tracer=tracer, checkpointer=checkpointer)
@@ -213,7 +214,8 @@ def run_graph_agent(
         answer=final["answer"], steps=final["steps"], stop_reason=final["stop_reason"],
         transcript=final["messages"], tracer=tracer, tokens=final["tokens"],
     )
-    # Write the resolved episode back to long-term memory.
-    if store and customer and result.stop_reason == "final":
-        store.add_episode(Episode(customer=customer, ticket=user_message, resolution=result.answer))
+    # Write back what this run learned: the episode, any durable fact a tool
+    # returned, and a lesson if it went wrong in a repeatable way.
+    if store and customer:
+        remember_run(store, customer, user_message, result)
     return result
